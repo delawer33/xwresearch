@@ -1,7 +1,5 @@
 # eXonware Repo Ecosystem — Overview
 
-> **Purpose of this file:** Give a new developer the full map in 2 minutes before reading individual reports.
-
 ---
 
 ## Two Families, One Namespace Each
@@ -20,15 +18,16 @@ Each family shares a **pkgutil namespace package** — multiple PyPI distributio
 
 ## xwauth Family
 
-| Repo | Package | Role |
-|------|---------|------|
-| `xwauth` | `exonware-xwauth` | OAuth 2.0 / OIDC core library: contracts, base classes, facade, tokens, sessions, federation, JOSE, SCIM, audit, webhooks, integrations |
-| `xwauth-identity` | `exonware-xwauth-identity` | First-party login ceremonies: email/password, magic links, phone OTP, TOTP, WebAuthn/passkeys, MFA, organizations, B2B, SCIM, FGA |
-| `xwauth-connect` | `exonware-xwauth-connect` | External IdP connector: 250+ OAuth/OIDC providers (Google, Apple, Microsoft, GitHub, …), SAML, LDAP, regional providers |
+| Repo              | Package                    | Role                                                                                                                                    |
+| ----------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `xwauth`          | `exonware-xwauth`          | OAuth 2.0 / OIDC core library: contracts, base classes, facade, tokens, sessions, federation, JOSE, SCIM, audit, webhooks, integrations |
+| `xwauth-identity` | `exonware-xwauth-identity` | First-party login ceremonies: email/password, magic links, phone OTP, TOTP, WebAuthn/passkeys, MFA, organizations, B2B, SCIM, FGA       |
+| `xwauth-connect`  | `exonware-xwauth-connect`  | External IdP connector: 250+ OAuth/OIDC providers (Google, Apple, Microsoft, GitHub, …), SAML, LDAP, regional providers                 |
 
 **Invariant:** `xwauth-identity` never imports `xwauth-connect`. Both discover each other at runtime via `discover_connect_package()` / `discover_identity_package()`.
 
 **Install combinations:**
+
 - `xwauth` alone → OAuth 2.0 mechanics + client helpers, no login UI
 - `xwauth` + `xwauth-identity` → full first-party IdP
 - `xwauth` + `xwauth-connect` → federated SSO broker
@@ -38,11 +37,11 @@ Each family shares a **pkgutil namespace package** — multiple PyPI distributio
 
 ## xwstorage Family
 
-| Repo | Package | Role |
-|------|---------|------|
-| `xwstorage` | `exonware-xwstorage` | Shared contracts, error types, enums, path utilities, one concrete local (file-backed) connector |
+| Repo                | Package                      | Role                                                                                                                                                                         |
+| ------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `xwstorage`         | `exonware-xwstorage`         | Shared contracts, error types, enums, path utilities, one concrete local (file-backed) connector                                                                             |
 | `xwstorage-connect` | `exonware-xwstorage-connect` | Connector runtime: 50+ backend connectors (PostgreSQL, MongoDB, Neo4j, Redis, S3, …), HTTP API server, ACID transactions, MVCC, deadlock detection, RLS, encryption, caching |
-| `xwstorage-db` | `exonware-xwstorage-db` | Embedded XW-native database engine: XWJSON-backed, CRUD, indexing (hash/sorted/trigram), transactions, snapshots, RLS, streaming I/O, admin CLI |
+| `xwstorage-db`      | `exonware-xwstorage-db`      | Embedded XW-native database engine: XWJSON-backed, CRUD, indexing (hash/sorted/trigram), transactions, snapshots, RLS, streaming I/O, admin CLI                              |
 
 **Dependency direction:** `xwstorage-db` → `xwstorage` ← `xwstorage-connect`. xwstorage-connect may use xwstorage-db as an engine driver; xwstorage-db must NOT import xwstorage-connect.
 
@@ -74,14 +73,14 @@ All 6 repos depend on `exonware-xwsystem` (v0.9.0.x). It provides: security prim
 
 ## Versions at Time of Analysis (June 2026)
 
-| Repo | Version | Status |
-|------|---------|--------|
-| xwauth | 0.0.1.11 | Alpha |
-| xwauth-identity | 0.0.1.4 | Alpha |
-| xwauth-connect | 0.0.1.11 | Alpha |
-| xwstorage | 0.0.1.9 | Alpha |
-| xwstorage-connect | 0.0.1.9 | Alpha |
-| xwstorage-db | 0.0.1.5 | Pre-alpha |
+| Repo              | Version  | Status    |
+| ----------------- | -------- | --------- |
+| xwauth            | 0.0.1.11 | Alpha     |
+| xwauth-identity   | 0.0.1.4  | Alpha     |
+| xwauth-connect    | 0.0.1.11 | Alpha     |
+| xwstorage         | 0.0.1.9  | Alpha     |
+| xwstorage-connect | 0.0.1.9  | Alpha     |
+| xwstorage-db      | 0.0.1.5  | Pre-alpha |
 
 ---
 
