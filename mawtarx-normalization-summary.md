@@ -1,78 +1,71 @@
-# Make/Model Normalization (S1) — Summary
+# Make/Model Normalization — What Was Done
 
-**Status:** Done, tested, committed. Ready to review.
-**Branches:** `s1-make-model-normalization` in both `markibx` and `mawtarx`.
-**Scope:** mawtarx + markibx only. Does **not** touch dedup/merge (later phase).
+*Status: done, tested, committed on branch `s1-make-model-normalization` (markibx + mawtarx). Not merged yet.*
 
-## The problem
+## The problem, in one line
 
-Car makes/models were matched as raw text, so `Mercedes Benz`, `Mercedes-Benz`,
-and `Mercedes` were **three different brands**. Pricing compared each car only
-against its own spelling group — smaller, wrong pools — giving confident-but-wrong
-estimates (the audit measured ~36% of premium estimates moving >5%). The same
-bug hit fraud checks, market liquidity, and search.
+The system treated `Mercedes`, `Mercedes-Benz`, and `Mercedes Benz` as three
+different car brands. So when pricing a Mercedes, it only compared it against
+cars with the *exact same spelling* — a smaller, wrong group — and gave a
+confident but wrong price. The audit found this shifted about a third of
+premium-car prices. The same problem quietly hurt fraud detection, the market
+"how many similar cars are for sale" number, and search.
 
-## What we did
+## What we did about it
 
-1. **One normalizer** (`markibx.canonical_make` / `canonical_model`): dictionary
-   of ~60 brands + accent folding (`Škoda`→`skoda`) + emoji/punctuation strip +
-   1-letter-typo auto-fix. Keeps non-Latin scripts (Cyrillic/Arabic) as their own
-   slug instead of blanking them.
-2. **Two stored columns** (`make_norm`, `model_norm`) on every listing.
-3. **One enforcement point:** the store recomputes them on every write, so data
-   can't drift and old rows self-heal on their next scrape.
-4. **Switched every matcher** — pricing, fraud, market, search, catalog linking —
-   to the clean key.
-5. **Backfilled all 141k rows** and added the index.
+We built one small tool that cleans up any make/model spelling into a single
+standard form — `Mercedes-Benz`, `Mercedes benz`, `MERCEDES`, even `🚀Mercedes`
+all become the same thing. It knows ~60 real brands, fixes accents and small
+typos, and handles Arabic/Cyrillic names too.
 
-## Results (measured on the real 141k database)
+Every car now stores this cleaned-up version alongside its original text. The
+database fills it in automatically on every save, so it can never get out of
+sync, and old records fix themselves the next time they're scraped. We then
+pointed everything that compares cars — pricing, fraud, market stats, search,
+and the catalog link — at the clean version instead of the raw text. Finally we
+cleaned up all 141,000 existing cars in one pass.
 
-| | Before | After |
-|---|---|---|
-| Listings on a clean, known brand | — | **96.3%** |
-| Mercedes spellings | 7 pools | 1 pool |
-| Comparable pool size (Mercedes sample) | ~23 | ~59 |
-| Unidentifiable rows | — | 58 (0.04%, pure emoji/symbol names) |
+## Did it work?
 
-Pricing now reaches its highest-confidence tier on cars that used to fall to weak
-fallbacks; fraud no longer flags a fair car for having differently-spelled peers.
+Yes, measured on the real 141k-car database:
 
-## Critical review + refactor (this pass)
+- **96% of cars now sit under a clean, known brand** (was a mess of 1,000+ spellings).
+- The Mercedes example went from **7 separate groups down to 1**.
+- A typical Mercedes now gets compared against **~59 similar cars instead of ~23**.
+- Only **58 cars** (0.04%) are left unidentifiable — and those are genuinely junk
+  (someone put an emoji like ✅ or 🚗 as the brand name).
 
-Reviewed the first cut and fixed what was wrong:
+In plain terms: pricing now has enough real comparisons to be confident, and a
+fairly-priced car is no longer flagged as suspicious just because its rivals were
+spelled differently.
 
-- **Real bug found & fixed:** the SQL search and in-memory search normalized a
-  *model-only* query differently, so the same filter could match in one and not
-  the other. Both now share one helper (`search_norm_keys`) — they can't diverge.
-- **Non-Latin makes** were collapsing to blank (Cyrillic/Arabic). Fixed the
-  slugifier to keep any script; re-ran backfill (blank makes 124 → 58, all now
-  genuine emoji-only junk).
-- **Consistency:** catalog linking now keys on the canonical make slug like
-  pricing does, so a listing spelled "Mercedes" links to the "Mercedes-Benz"
-  catalog entry (smoke-test link rate 88% → 100%).
-- **De-duplicated** the enforcement helper so both stores share one copy.
+## What the review pass caught
 
-## Testing
+After the first version we went back and looked hard for mistakes. We found and
+fixed:
 
-**129 tests pass, zero regressions** (40 new, written before the code / TDD).
-Ran the real pricing/fraud/market/catalog engines end-to-end as a smoke test.
+- **A genuine bug:** the two ways the app searches (one for the live database,
+  one used in tests) cleaned up search terms slightly differently, so the same
+  search could find a car in one place and miss it in the other. Now they share
+  one piece of code and always agree.
+- **Non-English brands were being wiped:** brands written in Arabic or Russian
+  were turning into blank, which lumped them all together. Fixed — they now keep
+  their own identity.
+- **The catalog link** now recognises "Mercedes" and "Mercedes-Benz" as the same
+  car, which it didn't before.
 
-## What's next (not done here, on purpose)
+Everything is covered by **129 automated tests, all passing**, plus an
+end-to-end run through the real pricing/fraud/market code.
 
-- **Dedup/merge switch** — the risky part (collapses duplicate rows). Separate
-  phase, gated on a dry-run safety check.
-- **Scraper data quality** — the leftover ~3.7% unresolved is mostly (a) real
-  brands the ~60-list doesn't have yet (Dacia, Cupra, Daewoo…) and (b) a couple of
-  connectors (`bazos.cz/sk`) dumping title text into the make field. Both are data/
-  connector work, not code: grow the dictionary, add a title-recovery fallback for
-  the 2-3 bad connectors, and question whether non-Saudi sources belong at all.
+## What we deliberately left for later
 
-## Where to look
+- **Merging duplicate listings** — this is the risky part (it deletes rows), so
+  it's a separate, carefully-gated step. Not touched here.
+- **Scraper quality** — the last few percent of messy data isn't a code problem.
+  It's two things: (1) a handful of real brands we haven't added to the list yet
+  (Dacia, Cupra, Daewoo…), and (2) two Czech/Slovak scrapers dumping the ad title
+  into the brand field. Both are quick follow-ups — grow the brand list, and
+  either fix or drop those two scrapers (they're not even Saudi-market anyway).
 
-- Code: `markibx/normalize.py`, `markibx/normalize_data.py` (the dictionary),
-  `mawtarx/store*.py`, `pricing.py`, `fraud.py`, `market.py`, `catalog_link.py`.
-- Migration + backfill: `mawtarx/migrations/007_make_model_norm.sql`,
-  `mawtarx/backfill_make_model_norm.py` (run once on deploy — idempotent, also
-  builds the index).
-- Full technical write-up: `mawtarx-normalization-report.md`.
-- Design decisions: `mawtarx-normalization-plan.md`.
+---
+*More detail: `mawtarx-normalization-report.md` (technical) · `mawtarx-normalization-plan.md` (design decisions).*
