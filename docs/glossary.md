@@ -26,5 +26,7 @@ Terms agents keep re-deriving. Each fact has one home; this is the shortlist.
 - **Mojaz** — the vehicle-history contract. Never returns `verified` without real data
   (honest-by-default).
 
-- **CC-002** — contract decision: the API stores the advertised price as-is; FX conversion
-  is the frontend's responsibility. Full list: `repos/KARA_CONTRACT_CHANGES.md`.
+- **CC-002** — contract decision: the API stores the advertised price as-is; `price_sar` is
+  engine-internal and never serialized; FX conversion is the frontend's responsibility. Record:
+  `DECISIONS.md` D-004 — **not** in `repos/KARA_CONTRACT_CHANGES.md`, which only ever contained
+  CC-001 (the "full list" pointer here was dangling for weeks).

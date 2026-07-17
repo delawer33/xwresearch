@@ -1,0 +1,259 @@
+---
+name: deploy-vps
+description: Deploy changes from the kara/karaa, mawtarx, or markibx repos to the exonware-riyadh-01 VPS, and verify the deploy worked. Use when the user asks to push, deploy, ship, or update one of these repos on the server, or asks whether a server-side change will break something.
+---
+
+# Deploy to exonware-riyadh-01
+
+> **Companion doc:** `docs/vps-current-state.md` is the live-verified snapshot of
+> how the box is actually wired right now (services, ports, venvs, env files,
+> Caddy routes, data dirs). Read it for *what's running*; this skill is *how to
+> ship to it*. It's a snapshot, not a spec — where it and the running server
+> disagree, the server wins and the doc is stale, so re-verify live before
+> relying on any specific number.
+
+## Server access
+
+```bash
+KEY=~/.ssh/exonware_riyadh_shukri_rsa
+ssh -i $KEY shukri@149.104.105.145
+```
+
+No CI/CD. No git on the server. Every deploy is: build locally → tar the working
+tree → scp → extract into a fresh staging dir on the VPS → `pip install
+--force-reinstall --no-deps` into the right venv → restart the right systemd
+unit(s) → verify. `sudo` on the box is passwordless for `shukri`. Ignore the
+`sudo: unable to resolve host exonware-riyadh-01` warning that prints on every
+sudo call — it's a DNS quirk, not a failure; the command still runs.
+
+## Service map — read this before touching anything
+
+| Product | Repo dir (local) | systemd unit | venv (real one) | Port | Public domain | Env file |
+|---|---|---|---|---|---|---|
+| Karaa | `repos/kara-api` | `karaa-api.service` | `/opt/karaa-api/.venv` | 8132 | karaa.net | `/etc/karaa-api.env` |
+| Karaa lib | `repos/kara` | *(imported by kara-api, not a service itself)* | — | — | — | — |
+| markibx API | `repos/markibx-api` | `markibx-api.service` | `/opt/markibx-api/.venv` (**shared**) | 8242 | markibx.com | `/etc/markibx-api.env` |
+| markibx connect | `repos/markibx-connect-api` | `markibx-connect-api.service` | `/opt/markibx-api/.venv` (**same venv as markibx-api**) | 8244 | markibx.com/api/markibx-connect | — |
+| mawtarx API | `repos/mawtarx-api` | `mawtarx-api.service` | `/opt/mawtarx-api/.venv` | 8252 | mawtarx.com | `/etc/mawtarx-api.env` |
+| mawtarx connect | `repos/mawtarx-connect-api` | `mawtarx-connect-api.service` | `/opt/mawtarx-connect-api/.venv` (**separate venv**, not shared with mawtarx-api) | 8253 | mawtarx.com/api/mawtarx-connect | — |
+| markibx core | `repos/markibx` | *(library only)* | installed into **both** `/opt/markibx-api/.venv` and `/opt/mawtarx-api/.venv` | — | — | — |
+| mawtarx core | `repos/mawtarx` | *(library only)* | installed into `/opt/mawtarx-api/.venv` only | — | — | — |
+
+**Traps that will bite you if you skip this table:**
+
+- **`/opt/kara-api` vs `/opt/karaa-api` — two different directories exist.** Only
+  `karaa-api.service` runs (confirm with `systemctl list-units | grep -i kara`
+  — there is no `kara-api.service`). `/opt/kara-api/.venv` is a legacy leftover
+  from before the karaa rename; it still holds `libxwjson_abi.so`, which
+  `mawtarx-api.service` and `markibx-api.service` both reference via
+  `XWJSON_ABI_LIB=/opt/kara-api/libxwjson_abi.so` in their env files — so don't
+  delete it. But never install a package update there expecting it to reach
+  the live site; always target `/opt/karaa-api/.venv`.
+- **markibx-api and markibx-connect-api share one venv.** Push `markibx` core
+  changes there once, but restart *both* services.
+- **mawtarx-api and mawtarx-connect-api do NOT share a venv**, unlike the
+  markibx pair. Don't assume symmetry.
+- **`mawtarx` (core) depends on `markibx` (core)**, and both mawtarx-api and
+  markibx-api embed markibx in-process. If you change `markibx/src/exonware/markibx/`,
+  it needs pushing to **both** venvs it lives in, not just the one for the repo
+  you think you're changing. Check what's actually installed before assuming
+  it's current:
+  ```bash
+  /opt/<venv>/.venv/bin/pip show exonware-markibx   # version (often unhelpful, doesn't bump on every change)
+  /opt/<venv>/.venv/bin/python -c "import exonware.markibx as m, os; print(sorted(os.listdir(os.path.dirname(m.__file__))))"
+  # compare the file list against src/exonware/markibx/ locally — missing files = stale install
+  ```
+- **`kara-api` calls `mawtarx-api` over HTTP, not in-process** (`mawtarx_client.py`,
+  proxied routes in `routes/mawtarx_proxy.py`). `/pricing`, `/deals`, `/catalog`,
+  `/connectors` are *always* proxied through to mawtarx-api regardless of
+  `KARAA_LISTINGS_MODE`. **Prod runs `KARAA_LISTINGS_MODE=hybrid`** (verified
+  2026-07-10, `/etc/karaa-api.env`) — so `/search/listings`, `/listings/{id}`,
+  `/mojaz/{id}`, `/dealers`, `/makers`, `/map/availability` are served from
+  karaa-api's **`HybridVehicleStore`**, which federates its own xwjson store with
+  mawtarx-api's listings pulled over HTTP (`MAWTARX_API_URL`). Net: mawtarx-api
+  being up affects karaa.net's *listing counts* too, not just the intelligence
+  routes — if you deploy mawtarx-api, re-check karaa-api. **Restart trap:** the
+  mawtarx half warms in a background thread, so `/search/listings` shows only the
+  few-hundred local rows for a few seconds post-restart before the ~10k federated
+  total appears (see verify step below). `local` = own store only; `mawtarx` =
+  pure proxy — prod is neither.
+- **There's an old shared script pair** —
+  `markibx-api/scripts/vps-markibx-mawtarx-deploy/{pack-bundle.sh,remote-install.sh}`
+  — that bundles and reinstalls all 8 packages (markibx, markibx-connect,
+  markibx-api, markibx-connect-api, mawtarx, mawtarx-connect, mawtarx-api,
+  mawtarx-connect-api) in one shot, stopping all four services unconditionally
+  before it even builds anything. It's all-or-nothing and has no pre-restart
+  safety check — a broken `pyproject.toml` in any one of the 8 leaves every
+  service down until manually fixed. Prefer the manual per-repo procedure
+  below for anything short of a full-stack release; it's slower but each step
+  is independently verifiable and nothing stops until the replacement is known
+  to import cleanly.
+
+## Deploy procedure (do this for every repo you touch)
+
+### 0. Know what you're about to ship
+
+```bash
+cd repos/<repo>
+git status --porcelain     # uncommitted changes ship too — tar is of the working tree, not git archive
+git log --oneline -3       # what's already committed that isn't on the server yet
+```
+
+### 1. Build-test locally, before touching the server
+
+This is the single most valuable step — it catches a broken `pyproject.toml`
+or import error while the cost of being wrong is zero (nothing on the server
+has been touched yet).
+
+```bash
+cd repos/<repo>
+rm -rf /tmp/build-check
+python3 -m venv /tmp/build-check >/dev/null 2>&1
+/tmp/build-check/bin/pip install --quiet hatchling >/dev/null 2>&1
+/tmp/build-check/bin/pip install --no-deps . 2>&1 | tail -15
+rm -rf /tmp/build-check
+```
+
+If it doesn't say `Successfully installed`, stop — do not proceed to the
+server. (This caught a corrupted `[project.optional-dependencies]` block in
+`mawtarx/pyproject.toml` that would otherwise have stopped all four
+markibx/mawtarx services mid-deploy with no way back but a manual fix.)
+
+If the repo bundles non-`.py` data (e.g. `data/*.json` vocab files), also
+check it lands in the wheel — `hatchling` includes everything under the
+`packages` path by default regardless of `.gitignore`, but verify once per repo:
+
+```bash
+python3 -m venv /tmp/wheel-check >/dev/null 2>&1
+/tmp/wheel-check/bin/pip install --quiet hatchling >/dev/null 2>&1
+/tmp/wheel-check/bin/pip wheel --no-deps -w /tmp/wheel-out . 2>&1 | tail -5
+unzip -l /tmp/wheel-out/*.whl | grep -i <expected-file>
+rm -rf /tmp/wheel-check /tmp/wheel-out
+```
+
+### 2. Tar the whole repo, not just `src/`
+
+Tar `pyproject.toml`, `README.md`, and `src/` together so `pip install
+<dir>` has everything it needs — don't rely on a stale `/tmp/<repo>` on the
+server already having `pyproject.toml` from a previous run.
+
+```bash
+cd repos/<repo>
+tar -czf /tmp/<repo>-src.tar.gz --exclude="__pycache__" --exclude=".git" --exclude=".venv" pyproject.toml README.md src
+scp -i ~/.ssh/exonware_riyadh_shukri_rsa /tmp/<repo>-src.tar.gz shukri@149.104.105.145:/tmp/
+```
+
+### 3. Extract into a fresh dir on the server, install, but don't restart yet
+
+```bash
+ssh -i ~/.ssh/exonware_riyadh_shukri_rsa shukri@149.104.105.145 '
+rm -rf /tmp/<repo>-deploy
+mkdir -p /tmp/<repo>-deploy
+tar -xzf /tmp/<repo>-src.tar.gz -C /tmp/<repo>-deploy
+sudo /opt/<correct-venv>/.venv/bin/pip install /tmp/<repo>-deploy --force-reinstall --no-deps
+'
+```
+
+Use the service map above to get `<correct-venv>` right — this is where the
+`/opt/kara-api` vs `/opt/karaa-api` mistake happens.
+
+### 4. Pre-restart sanity check — import it before you restart it
+
+The old process is still serving traffic at this point; a failure here costs
+nothing. Set the same env vars the real systemd unit sets (check
+`sudo cat /etc/<service>.env` for `XWJSON_ABI_LIB` etc. — several services
+need it to import `xwstorage`/`xwjson` at all):
+
+```bash
+ssh -i ~/.ssh/exonware_riyadh_shukri_rsa shukri@149.104.105.145 '
+XWJSON_ABI_LIB=/opt/kara-api/libxwjson_abi.so /opt/<venv>/.venv/bin/python -c "
+import exonware.<package>
+from exonware.<package_api>.app import create_app
+app = create_app()
+print(\"app builds OK\")
+"
+'
+```
+
+For a core library change (markibx/mawtarx), also assert the new symbols
+exist (`hasattr(...)`, or import the new function/constant directly) — a
+successful import doesn't prove the new code is actually there if the wheel
+silently didn't bundle a file.
+
+If this fails, fix it and re-run steps 1–4. **Do not restart the service on a
+failing check.**
+
+### 5. Restart, then verify from the inside
+
+```bash
+ssh -i ~/.ssh/exonware_riyadh_shukri_rsa shukri@149.104.105.145 '
+sudo systemctl restart <service>          # restart every service sharing the venv, not just one
+sleep 2
+sudo systemctl is-active <service>
+curl -s http://127.0.0.1:<port>/api/<prefix>/v1/health
+sudo journalctl -u <service> --since "2 minutes ago" --no-pager | grep -iE "error|traceback|exception"
+'
+```
+
+Then exercise the actual code path that changed, not just `/health` — hit the
+new route, or a route that internally calls the new method, and check the
+response body has real data, not just a 200:
+
+```bash
+curl -s "http://127.0.0.1:<port>/api/<prefix>/v1/<changed-route>"
+```
+
+**karaa-api specifically:** its `hybrid` store warms the mawtarx half in a
+background thread, so `/search/listings?limit=1` returns a total of only a few
+hundred (local rows) for the first few seconds after restart, then jumps to ~10k
+once the mawtarx snapshot loads. Wait and re-query before concluding the deploy
+dropped listings — a low count immediately post-restart is the warm-up, not a
+regression. (`health` reports `listings_mode` + a `listings` count you can sanity-check.)
+
+### 6. Verify from the outside
+
+Confirm it's reachable over the real domain, through Caddy/TLS/DNS — not just
+loopback on the box:
+
+```bash
+curl -s https://<domain>/api/<prefix>/v1/health
+```
+
+(`karaa.net`/`mawtarx.com` are gated by the xwauth-id site-gate via
+`forward_auth`; `markibx.com`'s `/api/*` routes are NOT gated at the Caddy
+level — the app gates its own console instead — so `curl` works there
+directly without a session.)
+
+### 7. Check downstream dependents
+
+If you changed `mawtarx-api` or `markibx-api`, re-check anything that proxies
+to it. `karaa-api`'s `/catalog`, `/connectors`, `/providers`, `/pricing`,
+`/deals` always forward to mawtarx-api — diff the proxied response against
+hitting mawtarx-api directly to prove it's really forwarding fresh data, not
+serving something stale:
+
+```bash
+diff <(curl -s http://127.0.0.1:8132/api/karaa/v1/catalog/stats) \
+     <(curl -s http://127.0.0.1:8252/api/mawtarx/v1/catalog/stats) && echo MATCH
+```
+
+### 8. Before treating any surprising data as a regression, check mtimes
+
+If a stats/count endpoint looks smaller or different than expected after a
+restart, don't assume the deploy caused it — check whether the underlying
+data file's mtime predates your restart:
+
+```bash
+sudo ls -la /var/lib/<service>/data/... 2>&1
+```
+
+A file untouched since before you started is not something you broke.
+
+## Cleanup
+
+```bash
+rm -f /tmp/<repo>-src.tar.gz   # local scratch tarball
+```
+
+(Leave the `/tmp/<repo>-deploy` staging dir on the server — harmless, and
+useful for the next person diagnosing what actually got shipped.)
