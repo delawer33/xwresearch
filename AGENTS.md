@@ -28,12 +28,41 @@ Then **verify against code, not prose**:
 - `git log -S"<symbol>"` tells you when a thing landed and, via the commit message, often why.
 - Ask "what would be true if this were live?" and check *that* — a route registered, a caller
   in product code, a service in the deploy config.
+- **Check what the name actually resolves to at runtime**, not what's nearest on disk. Files on
+  disk can be dead: deleted from git, untracked, and still sitting there. A `find` hit is not
+  an implementation.
+- **When a claim is cheap to test against the running system, test it.** One `curl` against the
+  VPS beats an hour of reading.
 
-State what you found plainly, including the unflattering version. "Merged and benchmarked but
-zero production routes" is the useful answer; "the new transport is live" is a lie that costs
-the next agent an hour.
+**Sync first — `/pull-repos`.** A stale checkout, an uncloned repo, and a dead file on disk all
+look identical to "this doesn't exist." That skill exists because all three fired at once; its
+"Why this exists" has the full story if you want it.
+
+Three ways a grep lies about usage:
+- **stale** — the repo moved; you're reading last month's code.
+- **absent** — the repo isn't cloned, so the feature is invisible.
+- **indirect** — product code imports the facade, not the package (`XWActionRouter` from `xwapi`,
+  never `exonware.xwaction`). Count what callers import.
+
+State what you found plainly, including the unflattering version, and **scope the claim to what
+you checked**: "no route *in the repos I synced* uses it" — not "it has zero production routes."
+
+**Not every task earns the full four (grep+`git log -S`+`/pull-repos`+curl-prod).** That weight
+is for shared-contract, cross-repo, or Technology/Product-layer changes, where being wrong is
+expensive. A one-file `kara` tweak with no external callers doesn't need all four — spending a
+day Orienting on a 10-minute change is its own bug. Match the depth to the blast radius, not to
+habit.
 
 ## 2. Reuse-check — it probably already exists
+
+**Layer cascade, not just utilities.** Company priority is Technology (`xw*`) > Products
+(`markibx`/`mawtarx`) > Projects (`kara`/client repos) — strategic weight, not delivery urgency
+(weekly delivery still runs on `kara`; see `CLAUDE.md`'s priority ladder). Before adding a
+**feature**, not just a utility, to `kara`: does it belong in an `xw` library (generic,
+non-car-specific capability)? In `markibx`/`mawtarx` (car-domain logic other products could
+reuse)? Only build it in `kara` if neither holds — see `ARCHITECTURE.md`'s dependency-direction
+section for why the direction is strict. If a week's work landed entirely in `kara`, that's a
+signal to check whether some of it belonged one layer up, not proof it didn't.
 
 **[`docs/tool-index.md`](docs/tool-index.md)** maps task → xw library → status, then that
 library's `CLAUDE.md` gives you the entry point and the sharp edges. Do this **before** writing
@@ -145,45 +174,16 @@ vocabulary deliberately.
 > per-package with an explicit `--project-path repos/<pkg>`, or treat them as reference. The
 > **guides are pure methodology and apply as-is.**
 
-**Guides worth opening** (`repos/muhdocstools/docs/guides/`, index at `docs/INDEX.md`):
+**Guides** — index at `repos/muhdocstools/docs/INDEX.md`. Start at `GUIDE_00_MASTER.md` (Five
+Priorities); `GUIDE_31_DEV.md` is the implementation heart. They're pure methodology, so unlike
+the tools they apply as-is.
 
-| When you need… | Read |
-|---|---|
-| The tie-breaker for any design conflict (Five Priorities) | `GUIDE_00_MASTER.md` |
-| Code implementation standards (the 130-KB heart) | `GUIDE_31_DEV.md` (+ `_PY` / `_TS` / `_RUST`) |
-| Architecture playbook / dependency direction | `GUIDE_13_ARCH.md`, `REF_41_DEPENDENCY_DIRECTIONS.md` |
-| Code review · security · testing · benchmarking | `GUIDE_35_REVIEW.md` · `GUIDE_64_SECURITY.md` · `GUIDE_51_TEST.md` · `GUIDE_54_BENCH.md` |
-| Where a doc/log belongs + filename format | `GUIDE_41_DOCS.md`, `GUIDE_00_MASTER §4/§7` |
-| Release & deploy | `GUIDE_61_DEP.md` |
+**Release / version / publish** — `repos/muhdocstools/tools/ci/commands.sh help` lists
+everything (`version verify`, `version auto-bump`, `quick_release`, `pypi_cleanup`).
+`CI_VERBOSE=1` for step-by-step logs.
 
-**Release / version / publish toolchain** (`repos/muhdocstools/tools/ci/`, JSON-defined):
-
-```bash
-repos/muhdocstools/tools/ci/commands.sh help              # list commands
-repos/muhdocstools/tools/ci/commands.sh help upload_auto  # usage for one command
-```
-
-| Command | Does |
-|---|---|
-| `version verify --project-path repos/<pkg>` | Confirm `version.py` is the single source of truth (release-blocking if drifted) |
-| `version auto-bump <pkg>` | Bump + propagate across `version.py`, `pyproject.toml`, headers |
-| `quick_release status\|push\|release\|hotfix` | End-to-end validate → bump → tag → build → publish |
-| `pypi_cleanup exonware-<pkg>` | Dry-run report of superseded PyPI builds to prune |
-
-`CI_VERBOSE=1` for step-by-step logs. Cross-package commands that walk `PACKAGES.txt` need
-adaptation here (see the caveat).
-
-**Its env/ports tooling doesn't apply to us** — don't burn time rediscovering that.
-`tools/ci/venvs/setup_venvs.py` needs `PACKAGES.txt`/repo-root discovery (our stack manages its
-own venvs via `/run-local-stack`); the port scripts resolve via `XW_SYSTEM_ROOT`; `auto_venv.ps1`
-is PowerShell-only. Our live port map is `docs/vps-current-state.md` + per-repo `CLAUDE.md`, not
-the umbrella `ports.txt`. `tools/infra/vps.example.json` is only a schema — real values live in a
-gitignored `.secrets/vps.json` in the umbrella repo, never here.
-
-**muhdocstools' own `docs/skills/` + the `/xw` orchestrator are a different system** — markdown
-workflows for a custom convention, not Claude Code skills. Read them for workflow logic; they
-don't run here. Ours are in `.claude/skills/`.
-
-The 60+ one-shot maintenance scripts (`rename_*`, `normalize_*`, `python_to_rust.py`) and
-`tools/logo-gen/` stay in `repos/muhdocstools/` — reference them in place, don't copy a stale
-duplicate here.
+**Don't bother with** (so you don't rediscover it): its venv/ports tooling and
+`vps.example.json` don't resolve here — we use `/run-local-stack` and
+`docs/vps-current-state.md`. Its `docs/skills/` + `/xw` orchestrator are a *different* system
+(markdown for a custom convention, not Claude Code skills — ours are `.claude/skills/`). The
+60+ one-shot scripts stay in place; don't copy stale duplicates here.

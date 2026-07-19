@@ -1,9 +1,11 @@
 # Tool index — does an xw lib already solve this?
 
 Task → platform lib → repo, so a new feature reaches for an existing tool instead of getting
-reinvented. Verified against real imports across kara/mawtarx/markibx as of 2026-07-17 (see
-each repo's own `CLAUDE.md` for the verified used-by list and gotchas). **Status** tells you
-whether the tool is proven in this product or just available.
+reinvented. **Status** tells you whether the tool is proven in this product or just available.
+
+> **Re-derived 2026-07-17** against synced HEADs of all 12 product repos: **9 directly imported,
+> 9 not.** "Not imported" ≠ unused — `xwaction` is everywhere via `xwapi`'s `XWActionRouter`.
+> Counts go stale; re-run `/pull-repos` before trusting them.
 
 | Need to... | Reach for | Status |
 |---|---|---|
@@ -15,8 +17,8 @@ whether the tool is proven in this product or just available.
 | Login / sessions / tokens / MFA | `xwauth-identity` (`exonware.xwauth.id`) | **live** — all 3 API repos |
 | Signed image-thumbnail proxy (no hotlinking) | `xwbase` (`.media`) | **live** — all 3 API repos |
 | HTTP fetch with rate-limit/policy for a connector | `xwapi.scrapping` | **live** — mawtarx-connect, markibx-connect |
-| HTTP route (FastAPI) | `xwapi` (`APIRouter`) | **live** — every route today |
-| One decorator = HTTP endpoint + native WebSocket-RPC | `xwaction` + `xwapi`'s `@XWAction`/`XWActionRouter` | **built, benchmarked, zero production routes** — see `repos/xwapi/CLAUDE.md` |
+| HTTP route | `xwapi` (`APIRouter`) | **live** — engine comes from xwbase's switch; prod resolved to `xwrouter` 2026-07-18, FastAPI is the fallback |
+| One decorator = HTTP endpoint + native WebSocket-RPC | `xwapi`'s `XWActionRouter` (built on `xwaction`) | **live and now the default** — kara-api runs 43 files on it; karaa-connect-api is 100%. mawtarx-api / markibx-api still plain `APIRouter`. Use it for new routes. |
 | Scoped auth on a route | `xwapi.fastapi_routes.require_scopes` | **live** |
 | Cached endpoint response | `xwapi.caching` (`XWApiCache`, `cached_endpoint`) | **live** — kara-api |
 | Federate login to an external IdP (Google, etc.) | `xwauth-connect` | **unwired** — nothing federates today |

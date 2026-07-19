@@ -66,8 +66,12 @@ sudo call — it's a DNS quirk, not a failure; the command still runs.
 - **`kara-api` calls `mawtarx-api` over HTTP, not in-process** (`mawtarx_client.py`,
   proxied routes in `routes/mawtarx_proxy.py`). `/pricing`, `/deals`, `/catalog`,
   `/connectors` are *always* proxied through to mawtarx-api regardless of
-  `KARAA_LISTINGS_MODE`. **Prod runs `KARAA_LISTINGS_MODE=hybrid`** (verified
-  2026-07-10, `/etc/karaa-api.env`) — so `/search/listings`, `/listings/{id}`,
+  `KARAA_LISTINGS_MODE`. **`KARAA_LISTINGS_MODE` read `local` on 2026-07-18** (live, via
+  `/api/karaa/v1/health`, which reports `listings_mode`) — but this note said
+  `hybrid` as of 2026-07-10 and nobody has confirmed the change was intended.
+  In `local` the site serves ONLY karaa's own rows (2.5k) and none of mawtarx's
+  (~12.9k), so if listing counts look low, check this FIRST. Always re-read
+  `health` rather than trusting either value here — so `/search/listings`, `/listings/{id}`,
   `/mojaz/{id}`, `/dealers`, `/makers`, `/map/availability` are served from
   karaa-api's **`HybridVehicleStore`**, which federates its own xwjson store with
   mawtarx-api's listings pulled over HTTP (`MAWTARX_API_URL`). Net: mawtarx-api
@@ -142,6 +146,25 @@ cd repos/<repo>
 tar -czf /tmp/<repo>-src.tar.gz --exclude="__pycache__" --exclude=".git" --exclude=".venv" pyproject.toml README.md src
 scp -i ~/.ssh/exonware_riyadh_shukri_rsa /tmp/<repo>-src.tar.gz shukri@149.104.105.145:/tmp/
 ```
+
+### 2b. ⚠️ A watchdog timer can restart the service mid-deploy
+
+The "install now, restart later" flow below is **not** atomic: an independent
+systemd watchdog restarts these units on its own schedule. Verified the hard way
+on 2026-07-18 — between `pip install` and the sanity check, the watchdog
+restarted `karaa-api` onto half-deployed code (new kara-api, stale markibx), it
+crashed on an ImportError, and `Restart=on-failure` recovered it ~15s later once
+the missing package landed.
+
+Two consequences:
+
+- **Install every package a repo needs in ONE ssh call**, before anything can
+  restart. Don't install app code in one step and its updated library in
+  another — that window is a live crash.
+- **Do not rely on a service staying stopped.** Any "stop it, do X offline,
+  start it" procedure (e.g. an offline data migration) can end up with the
+  service running concurrently against the same files. If you truly need it
+  down, `sudo systemctl mask` it first and unmask after.
 
 ### 3. Extract into a fresh dir on the server, install, but don't restart yet
 

@@ -2,9 +2,26 @@
 
 Terms agents keep re-deriving. Each fact has one home; this is the shortlist.
 
+- **VehicleListing vs CatalogVehicle** — the distinction everything else hangs off.
+  A **VehicleListing** (`mawtarx/types.py`) is *one seller's car at a point in time*: price,
+  mileage, city, seller, photos, condition. A **CatalogVehicle** (`markibx/catalog.py`) is the
+  *reference spec* for a make/model/year/trim — no price, no seller, no mileage. A listing
+  links to a catalog entry by `catalog_key`. (Older docs call the latter `CatalogCar`; that
+  name is gone.)
+
 - **catalog_key** — a car's identity in the catalog: `make|model|year|trim`.
   `year == 0` = model-level parent (specs shared across years); `year > 0` = per-year
   child that inherits the parent and overrides only what changed.
+
+- **price_sar** — a **derived display value, never stored and never serialized.** It is a
+  field on `VehicleListing`, but `from_dict` always recomputes it from the native price
+  (`to_sar_safe(price.val, price.cur, …)`), and `to_dict` deliberately omits it — it's
+  `0.0`, not null, for any currency without a configured peg. The engine compares in native
+  currency. Don't persist it, don't put it on a response model, and don't compute a market
+  gap from it (use `price_delta_sar`). See `DECISIONS.md` D-002/D-004.
+
+- **DealCategory** — the deal-score band on a listing: `exceptional`, `great`, `good`,
+  `fair`, `high`, `overpriced` (`mawtarx/types.py`).
 
 - **make_norm / model_norm** — the pricing-engine **matching** key (normalized, noisy:
   Arabic-script dupes, description-slug junk, one-offs). **Not** a display vocabulary —
@@ -26,7 +43,10 @@ Terms agents keep re-deriving. Each fact has one home; this is the shortlist.
 - **Mojaz** — the vehicle-history contract. Never returns `verified` without real data
   (honest-by-default).
 
-- **CC-002** — contract decision: the API stores the advertised price as-is; `price_sar` is
-  engine-internal and never serialized; FX conversion is the frontend's responsibility. Record:
-  `DECISIONS.md` D-004 — **not** in `repos/KARA_CONTRACT_CHANGES.md`, which only ever contained
-  CC-001 (the "full list" pointer here was dangling for weeks).
+- **stored_intelligence** — the estimate + deal score computed at **write** time and stored on
+  the listing; the serialization key for it. Deliberately *not* `intelligence`: the API card
+  builders overwrite that key with a flat presentation block, so sharing it made kara-api
+  hydrate an empty estimate. `None` means *not yet priced*, never "no comparables". D-007.
+
+- **CC-002** — contract decision: advertised price stored as-is, FX is the frontend's job; see
+  `price_sar` above. Record: `DECISIONS.md` D-004 — **not** `repos/KARA_CONTRACT_CHANGES.md`.

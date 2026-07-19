@@ -12,6 +12,28 @@ to a few lines — link the deep doc, don't inline it.
 
 ---
 
+## D-007 — price estimates are computed on write and stored, never on read
+
+**2026-07-18** · `store.upsert()` prices a listing and stores the estimate + deal score on it
+(`VehicleListing.intelligence`); every read path serves that value. A write marks its
+`(make_norm, model_norm)` bucket dirty and a background pass reprices only pools whose **median
+moved materially** — not every pool that changed.
+
+**Why:** both engines are pure functions of (listing, its pool), but reads re-ran them per row,
+per request — ~15k estimates for one cold `/listings/recommended` (5-7s, GIL-held on the single
+worker, stalling every other in-flight request). Repricing a whole bucket on *any* change just
+moved that stall into the background thread (79.6s for one write into a pool of 8,539); one new
+row shifts that median ~0.01%, so materiality is the gate.
+
+**Supersedes:** the per-request pricing that `karaa_api.mawtarx_intel` and kara-api's
+`inventory_cache` comps-index/cold-start caches existed to amortize — all removed.
+
+**Code:** `repos/mawtarx/.../intelligence.py` + `refresh_runner.py`. Serialized as
+`stored_intelligence` (see `docs/glossary.md` — **not** `intelligence`, which the card builders
+overwrite). Bulk loads defer pricing; refreshes persist via `bulk_persist()`, never `upsert()`.
+
+---
+
 ## D-006 — `dedup_key` falls back per-connector, not to a fixed field set
 
 **2026-07-05** · Cross-source listing identity is VIN-first. Without a VIN, the fallback key is
@@ -58,10 +80,12 @@ simultaneously.
 
 **Code:** `repos/kara-api/src/exonware/karaa_api/models.py:165` (the CC-002 comment).
 
-> **Provenance warning:** this decision is cited by identifier in the code and in
-> `docs/glossary.md`, but **CC-002 was never written into `repos/KARA_CONTRACT_CHANGES.md`** —
-> that file contains only CC-001. The glossary's "full list" pointer is dangling. This entry
-> is now the record; the date above is when it was *recorded here*, not when it was decided.
+> **Provenance:** "CC-002" was never written into `repos/KARA_CONTRACT_CHANGES.md` (it has only
+> CC-001). It's cited from memory in three places, and they disagree — `models.py:165` and the
+> glossary mean the price decision above; `kara/CONTEXT.md` (deleted) meant an unrelated
+> "European/Slavic tier is first-class" call. That tier claim is unverified and homeless:
+> `git -C repos/kara show 97339d4:CONTEXT.md` if it matters. This entry records only the price
+> half, which is confirmed in code. The date is when it was *recorded*, not decided.
 
 ---
 

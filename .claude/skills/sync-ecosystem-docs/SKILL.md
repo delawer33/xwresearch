@@ -23,10 +23,14 @@ the repos are under `repos/`).
 
 ## Guiding principle: one fact, one home — reconcile, never layer
 
-Every fact lives in exactly ONE doc; everything else points to it. The failure mode
-this skill exists to prevent is **layering**: a fresh paragraph appended next to a
-stale one, or the same fact copied into three files that then drift apart. When you
-find the topic already documented, you **edit that place** — you do not add a second.
+Every fact lives in exactly ONE doc; everything else points to it. The failure mode this skill
+exists to prevent is **layering**: a fresh paragraph appended next to a stale one, or the same
+fact copied into three files that then drift apart. When you find the topic already documented,
+you **edit that place** — you do not add a second.
+
+**How to write the line you land: `/doc-diet`** — it owns the doc principles and the slimming
+procedure. This skill decides *which doc owns a fact*; `doc-diet` decides *how it's written*.
+Don't restate its rules here.
 
 ## Step 0 — Is anything doc-worthy? (do this FIRST)
 

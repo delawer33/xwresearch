@@ -50,6 +50,10 @@ legitimate provider override is when several presets share one scraper — e.g. 
 user has seen it.** Fetch a real listing/index page (use a subagent for site-structure
 research — see below), then:
 
+0. **Viability gate.** Is the data in the served HTML, or JS-loaded (a bare SPA bootstrap
+   with no data looks identical to "no results")? Any anti-bot (DataDome/Cloudflare), or a
+   ToS/robots ban / paid-partner-API-only source? If protected or CSR-only, mark it
+   `DISABLED` and stop — never ship a scraper that fights anti-bot.
 1. Find the data: is there an **English** version or JSON API? Prefer it (see Translate).
    Look for `__NEXT_DATA__`, `ld+json`, a REST/GraphQL endpoint, or a spec table.
 2. **Dump every label/value pair on a real detail page.** Never declare a field
@@ -107,8 +111,13 @@ scraper.source)` → persist. A normalizer returning `None` drops that record si
   `seller_id`, `seller_phone`, `seller_whatsapp`, `dealer_id`.
 - **Scrape as many fields as possible.** If a field is genuinely too hard, **document why
   in a code comment** — never drop it silently.
-- **Rich attrs beyond that set** (seats, doors, horsepower, interior_color): put them in an
-  **`extras`** dict. It now persists to `VehicleListing.extras`.
+- **The emit list IS an allowlist.** `record_to_listing` silently drops any key not on it
+  (or not a first-class field) — an invented key (`cylinder_count`, `engine_size`) goes
+  nowhere, and a discrete spec folded into free-text `engine` is unrecoverable. A useful
+  field with no slot has two honest homes only: an **`extras`** dict (rich attrs — seats,
+  doors, horsepower, cylinders), or **promote to first-class** (add to `VehicleListing` +
+  the allowlist + API `ListingOut`). Flag which in the Phase-0 verdict; the user decides.
+  Never fold-into-text or emit-and-hope.
 - Price: emit **native** `price_value` + `price_currency` (e.g. `"KWD"`). Do NOT convert to
   SAR — that's a derived display value computed downstream (Plan B).
 
@@ -129,7 +138,7 @@ scraper.source)` → persist. A normalizer returning `None` drops that record si
   (a single-location dealer hardcoding `city`) is worthless there and must not be trusted.
   Extracting VIN wherever present sidesteps all of this.
 
-## Before you call it done — 6-step verification (mandatory)
+## Before you call it done — 7-step verification (mandatory)
 
 Run every step; show the numbers. Most connector bugs this project has seen were caught
 (or missed) here.
@@ -157,6 +166,17 @@ Run every step; show the numbers. Most connector bugs this project has seen were
 6. **Tests against captured real HTML**, not hand-typed fixtures. Capture pages into
    `tests/fixtures/<source>/`, load them in `tests/test_<source>.py`. Real fixtures are
    *preferred*; skip only if capturing is disproportionate to the change.
+7. **Survival check** — the bug this project shipped most. Push a record through
+   `record_to_listing` and print which scraped keys the `VehicleListing` **dropped**; any
+   useful one is a bug (→ extras or promote). Emitting a field the pipeline discards ==
+   not emitting it.
+   ```python
+   from exonware.mawtarx.store import record_to_listing
+   rec = n.normalize(raw, s.source); lst = record_to_listing(rec)
+   emitted = {k for k, v in rec.items() if v not in (None, "", [])}
+   kept = {f for f in emitted if getattr(lst, f, None) not in (None, "", [])} | set(lst.extras or {})
+   print("DROPPED:", emitted - kept)   # nothing useful may be here
+   ```
 
 ## Run it
 
@@ -181,9 +201,13 @@ an HTTP-388 block).
 - Don't bypass a site's access controls, robots rules, or rate limits. Ever.
 - Don't mark done on a red/blocked scrape, a silent 0-result, or without the 3-listing
   cross-check.
+- Don't change a live connector's dedup fields (`trim/color/city`) or `source_id` format
+  without recomputing `dedup_key` on stored rows first — a drift orphans them, so re-scrapes
+  duplicate instead of update.
 
 ## Output
 
 End with: the per-field scrapability verdict, the 3-listing cross-check numbers, blank-rate
-per field from a real run, which of the 6 verification steps passed, and anything left as a
-genuine (documented) site gap vs. a deferred fix.
+per field from a real run, which of the 7 verification steps passed (incl. the survival-check
+DROPPED set — must hold nothing useful), and anything left as a genuine (documented) site
+gap vs. a deferred fix.
