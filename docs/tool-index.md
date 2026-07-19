@@ -11,7 +11,8 @@ reinvented. **Status** tells you whether the tool is proven in this product or j
 |---|---|---|
 | Log / cache / serialize | `xwsystem` | **live** — everywhere |
 | Read/write one field of a large JSON doc without loading the whole file | `xwjson` (usually via `xwstorage-db`) | **live** |
-| Persist product data (the actual database) | `xwstorage-db` (`exonware.xwstorage.db`) | **live** — most-imported storage surface |
+| Persist product data (the actual database) | `xwstorage-db` (`exonware.xwstorage.db`) | **live** — most-imported storage surface. **Read [`xwstorage-db-guide.md`](xwstorage-db-guide.md) before any write-path or capacity work** — the default durability is the slow one, and there is no cross-process locking |
+| Store a `(timestamp, value)` series (price history, metric trends) | `xwstorage-db` → `db.timeseries()` | **unwired** — range/downsample/retention built in, used by zero product repos. Don't hand-roll one |
 | Shared money/value type | `xwschema` (`Price`) | **live** — every core+api repo |
 | Per-entity-class schema registry + migrations | `xwschema.registry` | **live** — markibx-api mountables |
 | Login / sessions / tokens / MFA | `xwauth-identity` (`exonware.xwauth.id`) | **live** — all 3 API repos |
