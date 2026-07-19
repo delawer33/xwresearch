@@ -7,8 +7,7 @@
 #   run-stack.sh status
 #   run-stack.sh logs  <mawtarx|kara-api|kara-web>
 #
-# Supported backend is xwstorage-db (xwjson). Postgres is force-disabled
-# (MAWTARX_PG_DSN="") - it is the DANGEROUS store that OOMs the box.
+# Backend is xwstorage-db (xwjson) - the only one there is.
 set -uo pipefail
 
 # repos/ dir = two levels up from this script (.claude/skills/run-local-stack/).
@@ -37,7 +36,6 @@ start_mawtarx(){
   # produced by mawtarx-connect — NOT the 200-row synthetic seed. Seeding is off so
   # the engine never injects fake rows into the real DB.
   systemd-run --user -u "$MAWTARX_UNIT" -p MemoryMax=2G -p MemorySwapMax=0 \
-    -E MAWTARX_PG_DSN= \
     -E MAWTARX_SYSTEM_DB_DIR="$ROOT/mawtarx-connect/mawtarx-data/xwdb-saudi-v2" \
     -E MAWTARX_STORE_FILE="$ROOT/mawtarx-connect/mawtarx-data/xwdb-saudi-v2/collections/listings.xwjson" \
     -E MAWTARX_CATALOG_FILE="$ROOT/mawtarx-connect/mawtarx-data/xwdb-saudi-v2/collections/catalog.xwjson" \

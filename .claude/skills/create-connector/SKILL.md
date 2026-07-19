@@ -181,9 +181,9 @@ Run every step; show the numbers. Most connector bugs this project has seen were
 ## Run it
 
 ```bash
-# one source into a fresh local Postgres (docker-compose.dev.yml brings one up)
+# one source into a throwaway local xwstorage-db dir
 repos/.venv/bin/python scripts/collect.py --sources <source_id> --fresh \
-  --db "postgresql://mawtarx:mawtarx@localhost:5432/mawtarx"
+  --xwdb /tmp/connector-check
 ```
 
 Then re-query blank-rates per field and eyeball a sample. A **`raw=0 persisted=0` with a

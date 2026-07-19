@@ -92,10 +92,9 @@ venv — they are not optional extras, they are the product.
   is its design reference, not an unbuilt promise.
 - **Local ≠ production.** Your laptop's data and the VPS's data differ a lot — don't reason
   about prod from your local store.
-- **Everything runs on xwjson** (xwstorage-db / flat files) — server *and* local. **Postgres
-  is not the store anywhere.** `PostgresVehicleStore` exists in mawtarx and is reachable via an
-  opt-in setting whose own comment marks it `DANGEROUS`; nothing selects it. Don't infer a
-  Postgres dev environment from that code or from mawtarx's older docs — there isn't one.
+- **Everything runs on xwjson** (xwstorage-db / flat files) — server *and* local. There is no
+  SQL database anywhere in this ecosystem. How the engine behaves, and the settings that decide
+  whether writes are fast or unusable: **[`docs/xwstorage-db-guide.md`](docs/xwstorage-db-guide.md)**.
 
 ## Which repo do I touch for X?
 

@@ -26,17 +26,9 @@ Request flow: **browser → kara-web:8135 `/api` → kara-api:8130 → mawtarx-a
 Then open **http://127.0.0.1:8135**. Start one at a time with
 `start mawtarx|kara-api|kara-web`.
 
-## Two rules that are NOT optional on this machine
+## The rule that is NOT optional on this machine
 
-1. **Postgres must stay disabled.** The script exports `MAWTARX_PG_DSN=` (empty).
-   Setting `MAWTARX_PG_DSN` routes mawtarx to `PostgresVehicleStore`, the
-   DANGEROUS/unsupported store with an **unbounded-memory failure mode** — it has
-   OOM-crashed this 14 GB box at **10 GB** when the local Postgres was flaky. The
-   supported store is xwjson. `repos/mawtarx-api/.env.local` has the DSN commented
-   out for the same reason; do not re-enable it. (See the `mawtarx-api-pg-dsn-crash`
-   memory and the DANGEROUS banner in `repos/mawtarx/.../store_pg.py`.)
-
-2. **Every service runs under a cgroup memory cap** (`systemd-run --user
+1. **Every service runs under a cgroup memory cap** (`systemd-run --user
    -p MemoryMax=2G -p MemorySwapMax=0`). This box is 14 GB with a 7.5 GB tmpfs
    `/tmp`; an unguarded runaway freezes the whole desktop. The cap makes the
    kernel OOM-kill the offending service instead. **Do not** launch these with a

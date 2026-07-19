@@ -115,25 +115,15 @@ Non-secret keys that define how the pieces talk (from `/etc/<svc>.env`):
 - **markibx-api** / **markibx-connect-api**: `MARKIBX_CATALOG_FILE=/var/lib/markibx-api/data/catalog.xwjson`,
   `MARKIBX_SEED_ON_EMPTY=1`, both `XWJSON_ABI_LIB=/opt/kara-api/libxwjson_abi.so`.
 
-## Data layer — flat-file xwjson, not Postgres (anywhere)
+## Data layer — flat-file xwjson
 
 Our stack stores everything in **xwjson flat files** under `/var/lib/<svc>/data/`
-(via xwstorage + the `libxwjson_abi.so` native lib).
+(via xwstorage + the `libxwjson_abi.so` native lib). Behaviour and tuning:
+[`xwstorage-db-guide.md`](xwstorage-db-guide.md).
 
-**There is no Postgres for our stack — on this server or on your laptop.** Verified
-2026-07-17, three independent ways:
-
-- **No driver is installed.** `pip list` in `/opt/karaa-api/.venv`, `/opt/mawtarx-api/.venv`,
-  and `/opt/markibx-api/.venv` shows **zero** psycopg / asyncpg / sqlalchemy packages. Our
-  services physically cannot open a Postgres connection.
-- **No config points at one.** None of `/etc/{karaa,mawtarx,markibx}-api.env` mentions
-  postgres, psycopg, `DATABASE_URL`, or `:5432`.
-- **`127.0.0.1:5432` is a `docker-proxy`** — the co-tenant Supabase stack, not us.
-
-`PostgresVehicleStore` **does** exist in the mawtarx source, reachable only via an opt-in
-setting whose own comment marks it `DANGEROUS` (`mawtarx-api/settings.py`). Nothing selects
-it. Do **not** infer a "dev Postgres" environment from that code, from `store_pg.py`, or from
-mawtarx's older docs — there isn't one, locally or here.
+Nothing in this ecosystem uses a SQL database — the code that once could was deleted
+2026-07-19. If you see `127.0.0.1:5432` on this box it is a `docker-proxy` for the
+**co-tenant Supabase stack**, which belongs to an unrelated project.
 
 At verification time the stores were **static snapshots**, not live-updating:
 
@@ -158,7 +148,7 @@ not to the federated total the homepage serves.
 
 - **No scraping process is running** (re-verified 2026-07-17). The only connector-related
   process up is the `mawtarx-connect-api` **HTTP surface** (:8253). There is **no
-  `collect.py` / `daemon.py` crawl running**, and **no scraping cron/timer**
+  `collect.py` crawl running**, and **no scraping cron/timer**
   (`/etc/cron.d` holds only `e2scrub_all` and `exonware-security`).
 - This matches the ecosystem note that mawtarx-connect is *being built, not running*.
   The connector work in `repos/mawtarx-connect` (the ~625 providers) is developed and tested

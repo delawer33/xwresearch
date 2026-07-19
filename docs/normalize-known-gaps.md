@@ -75,9 +75,6 @@ change is invisible on already-stored rows until they're next re-scraped
 (self-heal, by design). To apply a rule change immediately instead of waiting
 on the next scrape cycle:
 
-- **Postgres**: `backfill_make_model_norm.py` (batched `UPDATE`, builds the
-  index after). Postgres-only — does not apply to the xwjson/xwstorage-db
-  store this ecosystem actually runs on in prod (`../../CLAUDE.md`).
 - **Any store (xwjson, xwstorage-db, in-memory)**: `IVehicleStore.renormalize()`
   (added 2026-07-16, `store.py` + the `XwJsonVehicleStore`/
   `XwStorageDbVehicleStore` overrides in `store_xwstorage.py`) — recomputes
