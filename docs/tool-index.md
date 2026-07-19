@@ -11,7 +11,9 @@ reinvented. **Status** tells you whether the tool is proven in this product or j
 |---|---|---|
 | Log / cache / serialize | `xwsystem` | **live** — everywhere |
 | Read/write one field of a large JSON doc without loading the whole file | `xwjson` (usually via `xwstorage-db`) | **live** |
-| Persist product data (the actual database) | `xwstorage-db` (`exonware.xwstorage.db`) | **live** — most-imported storage surface. **Read [`xwstorage-db-guide.md`](xwstorage-db-guide.md) before any write-path or capacity work** — the default durability is the slow one, and there is no cross-process locking |
+| Persist product data (the actual database) | `xwstorage-db` (`exonware.xwstorage.db`) | **live** — most-imported storage surface. **Read [`xwstorage-db-guide.md`](xwstorage-db-guide.md) before any write-path or capacity work** — the default durability is the slow one, and the write path takes no cross-process lock (a fencing-lease primitive exists but isn't wired in) |
+| Cross-process file lock (one writer at a time) | `xwsystem` (`io.FileLock`) | **live** — kernel `flock`/`msvcrt`, crash-safe, `SHARED`/`EXCLUSIVE`. Was `open(...,"x")`-based and broken until 2026-07; anything that hand-rolled a lockfile should use this |
+| Cross-process ownership with a fencing token (reject a resumed stale writer) | `xwstorage-db` (`db.fencing.PartitionLease`) | **built, unwired** — stronger than a plain lock for single-writer stores; not yet exported or called by any write path |
 | Store a `(timestamp, value)` series (price history, metric trends) | `xwstorage-db` → `db.timeseries()` | **unwired** — range/downsample/retention built in, used by zero product repos. Don't hand-roll one |
 | Shared money/value type | `xwschema` (`Price`) | **live** — every core+api repo |
 | Per-entity-class schema registry + migrations | `xwschema.registry` | **live** — markibx-api mountables |

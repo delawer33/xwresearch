@@ -75,10 +75,17 @@ the loop in `bulk_write()`.
 
 ## Traps
 
-- **No cross-process locking exists.** The only synchronization is a `threading.RLock` inside one
-  engine instance — there is no `fcntl`/`flock` anywhere in the package. Two processes opening the
-  same DB root will silently corrupt each other. **One writer process per database, always.** If a
-  background job must write, run it inside the process that owns the store, not beside it.
+- **The engine write path takes no cross-process lock.** Its only synchronization is a
+  `threading.RLock` inside one engine instance. Two processes opening the same DB root will still
+  silently corrupt each other. **One writer process per database, always** — if a background job
+  must write, run it inside the process that owns the store, not beside it.
+  *Caveat to the old "no locking anywhere" claim:* a cross-process primitive now **exists** but is
+  **not wired in** — `fencing.py`'s `PartitionLease` is an `O_EXCL`-file fencing-token lease
+  (crash-safe as of the 2026-07 orphan-mutex fix) that rejects a stale writer resumed after
+  ownership moved, which a plain `flock` can't. It is unexported and no write path calls it yet;
+  wiring it into `engine.py` is the intended way to close the two-writer hole. `xwsystem.FileLock`
+  (also cross-process, `flock`-based) is the *mutual-exclusion* tool for callers like the scraper;
+  for the DB itself the fencing lease is the stronger fit.
 - **RAM is the real capacity ceiling, not disk.** At ~7 KB/doc resident, per process, unshared
   across workers: 100k docs ≈ 0.7 GB, 1M ≈ 7 GB. Multiply by worker count. The
   exonware-riyadh-01 box has ~15 GB and is multi-tenant.

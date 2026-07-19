@@ -1,7 +1,25 @@
 # Plan — make listing price history real
 
 **Goal:** a car detail page shows that car's actual observed asking-price history.
-**Status:** not started. Written 2026-07-19.
+**Status:** Phase X-A and Phase 1 landed 2026-07-19. Written 2026-07-19.
+
+## Landed so far (2026-07-19)
+
+| Item | What changed | Evidence |
+|---|---|---|
+| X-A | `xwsystem` `FileLock` rebuilt on `fcntl.flock`/`msvcrt`. It previously acquired via `open(path,"x")` and released by unlink: no release on crash (so `acquire(timeout=None)` deadlocked forever) and a racy unlink. **xwsystem did not lack a cross-process lock — it had a broken one.** | 17 new tests in `tests/0.core/io/test_core_file_lock.py`; the crash-release test is red against the old code, green against the new. 4 pre-existing FileLock tests still pass. |
+| X-A2 | `xwstorage-db` `fencing.py`: the `O_CREAT|O_EXCL` claim mutex had the same defect — a holder dying mid-claim bricked the partition permanently. Added `MUTEX_STALE_AFTER` + `_mutex_age()` with an mtime fallback for an unstamped mutex. | `tests/0.core/test_fencing.py` 7/7 (2 were red). |
+| — | `test_wal_durability.py`'s `_collection_records` helper looked for a `{"records": […]}` envelope; collection files are a bare JSON array, so it returned `[]` unconditionally. Three tests failed and every "nothing flushed yet" assertion passed **vacuously**. | 12/12 after the fix. **WAL durability itself is correct** — this de-risks Phase 0 item 5. |
+| 1 | Reconcile disarmed. `execute_schedule` now ignores any stored `reconcile` flag; `run_manual` and `POST /{source}/update` default to `reconcile=False`; `count` is passed as `max_records` so the partial-sweep guard can actually fire. | 5 new tests in `mawtarx-api/tests/test_schedule_reconcile_safety.py`, red before / green after; full-suite failure fingerprint unchanged. |
+
+**Deploy actions still outstanding** (config, not code): `MAWTARX_DB_DURABILITY=wal` and
+`MAWTARX_SCHEDULE_RUNNER=0`.
+
+**Blocked on environment:** the local checkout runs against **stale installed packages**, not
+worktrees — `xwsystem` installed is 0.9.0.38 vs 0.9.0.79 in `src/`, installed `xwaction` has no
+`caching.py`, and `exonware.xwauth` is absent. 42 mawtarx-api tests error on app construction
+for that reason alone, and any xwsystem change is invisible to mawtarx until reinstalled.
+Editable installs across the `xw*` repos are a prerequisite for Phases 2+.
 
 Today the chart is generated from `random.Random(seed(listing.id))` (`mawtarx/insights.py:77`).
 The version-chain engine behind it (`versioning.py`) is real and correct but has never had data,
@@ -31,8 +49,8 @@ A first draft of this plan built generic infrastructure inside `mawtarx`, which 
 
 | | What | Where | Why it isn't product-layer |
 |---|---|---|---|
-| A | Named cross-process lock | **xwsystem** | No `fcntl`/`flock` exists anywhere in xwsystem/xwapi/xwstorage/xwbase. `SourceLock` is the ecosystem's only one, stranded in a car repo — and xwstorage-db has **zero** cross-process safety, so one primitive closes both. |
-| B | `update_many` / bulk upsert | **xwstorage-db** | The engine has `insert_many` and no update equivalent, which is the *only* reason mawtarx hand-rolls `bulk_persist`/`mark_persist`. |
+| A | Named cross-process lock | **xwsystem** | ✅ **LANDED** (`5be433c`). Correction to the original claim: xwsystem *had* a `FileLock`, but it acquired via `open(path,"x")` and never released on crash — so this was a **repair**, not a port of `SourceLock`. It now uses `fcntl.flock`/`msvcrt`. **Second correction:** xwstorage-db is *not* without cross-process safety — `fencing.py`'s `PartitionLease` (a fencing-token lease, `O_EXCL`-based, predates this work) already exists and is crash-safe as of `02126e4`. So "one primitive closes both" was wrong: they are two primitives for two problems (see item 1 below). |
+| B | `update_many` / bulk upsert | **xwstorage-db** | ⚠️ **partly superseded.** `bulk_write()` already landed (`4bf74cd`) and coalesces N updates into one collection-file write (measured 72×). A separate `update_many` may no longer be worth adding — evaluate whether wrapping the loop in `bulk_write()` is enough before writing more. |
 | D | Interval + cron scheduling, run ledger | **xwsystem** | `mawtarx-api/connector_cron.py` is already fully generic — cron validation, matching, next-run — merely misfiled. Generalized from three implementations, not one. |
 | — | Service-to-service auth | **xwbase** (reuse) | `XWBASE_SERVICE_TOKEN` is already in the prod env. Not a decision, just don't reinvent it. |
 
@@ -49,13 +67,24 @@ own change with a keep-N setting rather than riding along here.
 Purely additive; no existing caller changes behaviour. xwsystem is **0.9.0.79** (pre-1.0), so the
 versioning rule still allows a MINOR correction if the first consumer reshapes the API.
 
-1. **A — named cross-process lock in xwsystem.** Generalize `mawtarx-connect/source_lock.py`
-   (already a real `fcntl.flock` mutex with cross-process tests). Keep its stale-lock/max-runtime
-   handling. Then have xwstorage-db use it, closing the two-writer corruption hole.
-2. **B — `update_many` in xwstorage-db.** Bulk upsert firing one `_persist_mutation` per batch, the
-   same shape as `insert_many`. Afterwards mawtarx's `bulk_persist`/`mark_persist` gymnastics
-   *shrinks*; it does not grow a workaround.
-3. **D — scheduling in xwsystem.** Contract-first (`contracts.py` Protocols, per I→A→XW). Move
+1. **A — cross-process lock. ✅ DONE (`xwsystem` `5be433c`).** Delivered as a repair of the
+   existing broken `FileLock`, not a port of `source_lock.py`. Tests in
+   `tests/0.core/io/test_core_file_lock.py` incl. a SIGKILL crash-release regression.
+   > **Open decision for whoever wires the DB write path (task: "wire fencing guard"):** two
+   > cross-process primitives now exist and they are *not* interchangeable. `xwsystem.FileLock`
+   > is mutual exclusion (right for the scraper/`collect` "one sweep per source" case).
+   > `xwstorage-db`'s `PartitionLease` adds a **fencing token** — it rejects a stale writer that
+   > was paused (GC/partition) and resumed after ownership moved, which plain `flock` cannot. For
+   > a single-writer DB that case is real, so the write path most likely wants `PartitionLease`,
+   > **not** `FileLock`. `PartitionLease` is crash-safe now but still **unexported and unwired**;
+   > wiring it into `engine.py` is its own task. Do not have xwstorage-db import `FileLock` just to
+   > satisfy the original plan text — that would be the weaker tool.
+2. **B — bulk update in xwstorage-db. ⚠️ mostly already present.** `bulk_write()` (`4bf74cd`)
+   coalesces many updates into one collection-file write. Before adding a distinct `update_many`,
+   confirm it buys anything `bulk_write()` doesn't; then move `ScrapingPersistenceAdapter`
+   (`mawtarx/store.py`) off per-record `upsert()` onto whichever primitive wins.
+3. **D — scheduling in xwsystem.** ⬜ **not started — this is the next real build.** Contract-first
+   (`contracts.py` Protocols, per I→A→XW). Move
    `connector_cron.py`'s generic logic and `daemon_schedule.is_overdue`. Reuse the existing
    `ProcessPool`, `CircuitBreaker`, `RetryConfig` rather than writing new ones.
    > **Dependency trap:** xwsystem must never import xwstorage-db — that reverses the arrow. So the
@@ -67,8 +96,8 @@ versioning rule still allows a MINOR correction if the first consumer reshapes t
    repo adopts it, so first real usage can still change the API.
 
 **Done when:** each has tests at foundation-library standard — the clock injected, schedule
-sequences property-tested, and the lock's cross-process behaviour covered as `test_source_lock.py`
-already does.
+sequences property-tested, and cross-process behaviour proven with a real second process (as
+`test_core_file_lock.py` now does for the lock, spawning + SIGKILLing a child).
 
 ## Phase 0 — Storage foundations
 
@@ -78,28 +107,29 @@ default `sync` durability.
 5. Set `MAWTARX_DB_DURABILITY=wal` for mawtarx-api. Deploy config, not code (`wal` not `batch`:
    same speed, no crash window).
 6. Move `ScrapingPersistenceAdapter` (`mawtarx/store.py:759-781`) off per-record `upsert()` onto
-   Phase X item 2's `update_many`.
+   the batch primitive from Phase X item B (`bulk_write()`, or `update_many` if it earns its place).
 
 **Done when:** 1,000 records ingested into a 15k-row store in seconds not minutes, and mawtarx-api
 p99 latency is unchanged during ingest. Measure, don't assume.
 
-## Phase 1 — Disarm reconcile (live today)
+## Phase 1 — Disarm reconcile (live today) — ✅ CODE LANDED (`mawtarx-api` `454c42e`)
 
-`ConnectorScheduleRunner` runs in production now — `MAWTARX_SCHEDULE_RUNNER` defaults to `"1"`
-(`mawtarx-api/state.py:175`). It has no schedules so it does nothing, but anyone adding one through
-the admin API fires a destructive path:
+The destructive path: `execute_schedule` defaulted `reconcile=True`, passed the bound only as
+`params={"count": …}` (so the partial-sweep guard at `pipeline.py:86` was permanently `False`),
+and `count` is honoured by only **3 of 44** connectors — so a run seeing ~30 listings marked the
+rest of a source's active inventory SOLD.
 
-`execute_schedule` defaults `reconcile=True` (`schedule_runner.py:131`) · it passes the bound as
-`params={"count": …}` and never sets `max_records`, so the partial-sweep guard at `pipeline.py:86`
-evaluates `False` · `count` is honoured by only **3 of 44** connectors, so the rest scrape their
-default page range · and `should_skip_reconcile` is imported **only by `collect.py`**. Result: a run
-seeing ~30 listings marks the rest of that source's active inventory SOLD.
+7. ⬜ **Still outstanding (deploy, not code):** set `MAWTARX_SCHEDULE_RUNNER=0` in prod.
+8. ✅ `execute_schedule` now ignores any stored `reconcile` flag entirely — a schedule never
+   reconciles. `run_manual` and `POST /{source}/update` default `reconcile=False`; the capability
+   stays opt-in for a human who knows the sweep was complete.
+9. ✅ Regression tests landed first (red), then the fix: `tests/test_schedule_reconcile_safety.py`
+   (5 tests). `count` is now also passed as `max_records` so the truncation guard can fire.
 
-7. **Immediately:** set `MAWTARX_SCHEDULE_RUNNER=0` in prod. Costs nothing, removes a live footgun.
-8. Retire the scheduling half of `ConnectorScheduleRunner`; keep `run_manual` for admin-triggered
-   runs, routed through the new safety checks.
-9. Regression test first, then fix: a partial sweep of a source with N active listings marks
-   **zero** sold. The test is the deliverable; the fix is secondary.
+> **Note for the next agent:** reconciliation was *disarmed*, not *rehomed*. The plan's intended
+> destination — reconcile on the sweep-completion path, gated on `should_skip_reconcile` against a
+> per-source baseline (Phase 2 item 14) — is **not built yet**. Until it is, nothing reconciles at
+> all, which is the safe state.
 
 ## Phase 2 — The ingest contract
 
@@ -108,8 +138,8 @@ The scraper never opens the database. mawtarx-api stays the only writer.
 10. Batch payload: `{source, sweep_id, batch_id, profile, raw_count, records: [...]}`.
 11. `POST /ingest/batch`, authenticated via **xwbase service tokens**. Validate, enqueue on a
     **bounded** queue, return 202. Never upsert inside the request.
-12. Background worker drains the queue, one `update_many` per batch, marks `(make_norm, model_norm)`
-    buckets dirty so D-007's refresh reprices normally.
+12. Background worker drains the queue, one batch write per batch (Phase X item B's primitive),
+    marks `(make_norm, model_norm)` buckets dirty so D-007's refresh reprices normally.
 13. Idempotent per `(sweep_id, batch_id)`; a replayed batch bumps `seen_count` and nothing else.
 14. `POST /ingest/sweep/{sweep_id}/complete` carrying the union of `seen_ids` and total `raw_count`.
     **Reconcile runs here, server-side, and only here** — it needs the whole sweep's seen-ids, which
