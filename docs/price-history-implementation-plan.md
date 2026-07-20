@@ -1,12 +1,86 @@
 # Plan — make listing price history real
 
 **Goal:** a car detail page shows that car's actual observed asking-price history.
-**Status:** Phase X (A, B, **D**) and Phase 1 landed; Phase 0.6 landed. Written 2026-07-19,
-extended 2026-07-20.
+**Status:** Phase X (A, B, **D**), Phase 0.6, Phase 1, and **Phases 4–5** landed. Remaining:
+Phase 2 (ingest), Phase 3 (runner), Phase 6 (rollout), plus two deploy-config items. Written
+2026-07-19, extended 2026-07-20.
+
+---
+
+## → Next agent: start here
+
+**The data and serving halves are done; nothing observes anything yet.** A car gets a real chart
+the moment it is swept twice — no code change needed, just sweeps. That's what's left.
+
+**Do these two first — minutes, not days.** They're deploy config, still outstanding, and item 7
+guards a destructive path:
+- `MAWTARX_DB_DURABILITY=wal` (Phase 0 item 5) — prod is on the `sync` default, ~190 ms per write.
+- `MAWTARX_SCHEDULE_RUNNER=0` (Phase 1 item 7) — the runner *is* running in prod; it fires nothing
+  today only because `connector_schedules.xwjson` is empty.
+
+**Then Phase 2 → 3 → 6, in that order.** They're sequential: nothing to run until the ingest
+contract exists, nothing to roll out until something runs.
+
+**Read before writing pipeline code:** `docs/price-history-test-strategy.md`. Two of its four
+design prerequisites are already built and waiting for you —
+
+- **the clock is a parameter** (`store.clock`, and `project_price_point(now_ms=…)`), and
+- **the sweep outcome is a pure function** (`mawtarx/price_series.py` — no I/O, no clock read).
+
+Phase 2's ingest should call `project_price_point` with the **server's** clock as `server_now_ms`
+and the scraper's timestamp as `now_ms`; that's what the skew check exists for (edge 18). The
+other two prerequisites — **recorded HTTP fixtures** and **dry-run as a real mode** — are *not*
+built and are expensive to retrofit. Build them before the connectors, not after.
+
+**One live gap you inherit:** on prod (`hybrid`), most listings are mawtarx-owned, and
+`/listings/{id}/price-history` is **not** in `mawtarx_proxy.py`'s forwarded set — so those charts
+stay `indicative` no matter how many sweeps run. karaa's own listings work end-to-end. Forwarding
+that endpoint is small and belongs with Phase 2.
+
+**Two things measured by nobody:** the per-sweep series write against a 15k store, and Phase 0's
+"1,000 records in seconds" target. Both are assumptions today. Measure, don't inherit the claim.
+
+---
 
 ## Landed so far
 
-### 2026-07-20
+### 2026-07-20 — Phases 4 + 5
+
+The whole data+serving path: a listing observed twice serves a real chart, automatically, per
+listing. No scraper involved — which is why it could land before Phase 2/3.
+
+| Item | What changed | Evidence |
+|---|---|---|
+| — | **New `mawtarx/price_series.py`** — the pure decision layer, and the seam Phase 2's ingest plugs into. Clock injected, no I/O, no wall-clock read (test-strategy §0.1 + §0.3). Currency is encoded in the **series name**, so C3 ("one series, one currency") cannot be violated by a caller. | 21 tests in `tests/test_price_series.py`, all of C1–C5. |
+| 21 | **Version chain capped** (`versioning.cap_versions`, `MAX_VERSIONS=120`), called from `_merge_listing_fields` — the only function that grows it. Keeps the **first** row (dealscore reads `points[0]`) and **every open row** (`record_version` bumps `seen_count` on them; losing one makes the chain regrow forever). A soft target, not a hard ceiling. | `tests/test_version_cap.py` (7). |
+| 22/23 | **Price points appended on resolved-price change**, at the store's merge point — *not* in `record_version`, which is scoped to one `(source, source_id)` while the chart draws the merged listing's price (§7). Native currency (D-002). | `tests/test_price_series_store.py` (15). |
+| 24 | **Backfill** from existing chains (`store.backfill_price_series`), idempotent, collapsing repeated prices so a title-only edit isn't replayed as a price change. **Runs before the cap** — capping first destroys rows it would have used. | `tests/test_price_series_backfill.py` (18). |
+| 25 | **Retention** (`prune_price_series`, 400-day window) via `TimeSeries.prune_before`. `downsample` unused: points are written only on price *change*, so there is nothing to thin yet. | same file. |
+| 26 | **`basis: observed` iff ≥2 real points**, else the synthetic series tagged `indicative`. Promotion is per listing and automatic. | `tests/test_price_history_basis.py` (13). |
+| 27/29 | Two **live** contract bugs fixed in both API repos: `currency` was documented "always SAR" while returning the native currency, and `global` was documented "market-wide trend" while being RNG around the listing's own price. `global` is now empty when `basis: observed`. | `mawtarx-api/tests/test_price_history_contract.py` (7). |
+| 28 | **kara-web**: axis label from the payload currency (was hardcoded `Price (SAR)`), plus an indicative caveat on both chart surfaces, both locales, dark-mode readable. | `tsc --noEmit` clean. |
+
+**Totals:** mawtarx 302 passed · mawtarx-api 58 · kara-api 129 · kara-web typechecks.
+Pre-existing failures unchanged (3 mawtarx-api, 6 kara-api — verified by stashing).
+
+**The one finding worth repeating here:** the feature was **inert on the live product** and every
+test still passed. `kara-api` has its *own* price-history route, and three layers each defeated it
+independently — the route passed the per-request `buyer_store` view (empty series),
+`HybridVehicleStore` didn't forward `price_points`, and kara-api's `models.py` carried its own
+copies of both false descriptions. Wiring `mawtarx-api` alone changes nothing users see. Guarded
+by `kara-api/tests/test_price_history_basis.py`.
+
+The other three (the `TimeSeries.points` property, series crash-safety, the xwjson sidecar) are
+recorded in their owning docs — `docs/xwstorage-db-guide.md` and `repos/kara-api/CLAUDE.md` — not
+repeated here.
+
+> **Known gap, not silent:** on prod (`hybrid` mode) most listings are **mawtarx-owned**, their
+> series lives in mawtarx-api's store, and `/listings/{id}/price-history` is **not** in
+> `mawtarx_proxy.py`'s forwarded set. Those listings correctly serve `indicative` from kara-api
+> rather than a chart it cannot substantiate. Karaa's own listings work end-to-end. Proxying that
+> endpoint is Phase 2/3 work.
+
+### 2026-07-20 — foundations
 
 | Item | What changed | Evidence |
 |---|---|---|
@@ -26,11 +100,33 @@ extended 2026-07-20.
 **Deploy actions still outstanding** (config, not code): `MAWTARX_DB_DURABILITY=wal` and
 `MAWTARX_SCHEDULE_RUNNER=0`.
 
-**Blocked on environment:** the local checkout runs against **stale installed packages**, not
-worktrees — `xwsystem` installed is 0.9.0.38 vs 0.9.0.79 in `src/`, installed `xwaction` has no
-`caching.py`, and `exonware.xwauth` is absent. 42 mawtarx-api tests error on app construction
-for that reason alone, and any xwsystem change is invisible to mawtarx until reinstalled.
-Editable installs across the `xw*` repos are a prerequisite for Phases 2+.
+**Environment: resolved 2026-07-20 — the diagnosis above was wrong.** Editable installs were
+never the problem. `repos/.venv` carries 21 `__editable__` `.pth` files and every package
+resolves to its worktree (`xwsystem` 0.9.0.79 — not 0.9.0.38; `exonware.xwaction.caching` and
+`exonware.xwauth` both present). The 42 mawtarx-api errors were **one env var**: the venv is
+built on GIL-enabled `/usr/bin/python3.13`, and `xwbase/config.py:85` refuses to serve on a
+GIL-enabled interpreter unless `XWBASE_ALLOW_GIL=1`. Every test constructing the app died at
+import with a `RuntimeError` that looked exactly like a broken install.
+
+Fixed at the environment level: `repos/.venv/…/site-packages/xwresearch_env.py` +
+`zz_xwresearch_env.pth` set the override via `setdefault`. **It is a `.pth`, not a
+`sitecustomize.py`, deliberately** — Debian ships `/usr/lib/python3.13/sitecustomize.py` and
+stdlib precedes site-packages on `sys.path`, so a `sitecustomize.py` there is silently shadowed
+and never runs. The real fix is a free-threaded interpreter (`python3.13t`); this unblocks local
+runs until then, and is venv-local so the guard still applies on the VPS.
+
+Also found: `pytest-asyncio` was neither installed nor declared, so
+`mawtarx/tests/test_scrape_persistence_batching.py`'s async test — the Phase 0.6 evidence —
+**had never actually executed**. Now installed and declared in mawtarx's `dev` extra; all 3
+pass, so the 0.6 claim holds, but it was unproven until today.
+
+Baselines on a clean env (no `PYTHONPATH`, no env vars): mawtarx **all green**; mawtarx-api 3
+failed / **0 errors** (`test_admin_sync`, `test_homepage`, `test_vin_report` — real product
+bugs, not environmental); xwstorage-db `0.core` the 2 known FORMAT_ERROR reds.
+
+> **Caveat for the next agent:** `repos/.venv` is untracked, so a rebuilt venv loses both fixes.
+> Re-apply the `.pth` and `pip install pytest-asyncio` if 42 errors or a "async not natively
+> supported" failure reappear.
 
 Today the chart is generated from `random.Random(seed(listing.id))` (`mawtarx/insights.py:77`).
 The version-chain engine behind it (`versioning.py`) is real and correct but has never had data,
@@ -181,32 +277,21 @@ primitives it consumes (`daemon_schedule`, `source_lock`, `sweep_tracker`, `reco
 19. Dry-run mode: execute a real sweep, write nothing, report what would change.
 20. systemd unit with graceful drain, own user.
 
-## Phase 4 — Price history data
+## Phase 4 — Price history data — ✅ DONE (items 21–25)
 
-21. Cap `listing.versions` — retention keeping the first point plus the last K. Unbounded growth on
-    a fully-resident collection is the real RAM ceiling and `dealscore.py:172` only needs
-    first-vs-last. Do this **before** repeated scraping starts.
-22. When the merged listing's **resolved** price changes, `db.ts_append("listing_prices",
-    listing.id, epoch_ms, price_val)`. Native currency (D-002).
-23. Guard a currency change — start a new series rather than mixing units.
-24. One-off backfill projecting existing version chains into the series.
-25. Retention via `TimeSeries.prune_before` + `downsample` — full fidelity recent, thinned older.
+See the 2026-07-20 landed table. Two constraints still govern:
 
 **Size budget:** a SeriesSet is one file rewritten whole on flush. ~15k listings × ~12 points is
 single-digit MB, negligible beside the 41 MB listings collection and crucially not touching it.
 Revisit sharding past ~50 MB.
 
-## Phase 5 — Serving
+**Unmeasured:** the series write now happens once per sweep (`_flush_bulk`). Its cost against a
+15k store has not been measured — same gap as Phase 0's item 5. Measure, don't assume.
 
-26. `insights.price_history` reads the series. **≥2 observed points → `basis: "observed"`**;
-    otherwise keep the synthetic series tagged `basis: "indicative"`. Promotion is per listing and
-    automatic — no flag day.
-27. Fix `PriceHistoryOut.currency`: documented "ISO 4217 code, always SAR", actually returns native
-    `listing.price.cur`. Independent live bug — ship early.
-28. kara-web: axis label from the payload, not the hardcoded `Price (SAR)`
-    (`price-history-chart.ts:71`); show an affordance when `basis != "observed"`.
-29. `global_` is documented "market-wide price trend" and is RNG around the listing's own price.
-    Out of scope — mark it indicative or drop it, but **do not leave it documented as market-wide**.
+## Phase 5 — Serving — ✅ DONE (items 26–29)
+
+See the 2026-07-20 landed table, including the known kara-api proxy gap that keeps mawtarx-owned
+listings on `indicative` until Phase 2/3 forwards the endpoint.
 
 ## Phase 6 — Rollout
 
@@ -222,11 +307,11 @@ Revisit sharding past ~50 MB.
 
 ## Effort and the honest timeline
 
-Phase X is days (its logic largely exists and moves). Phases 0–1 are days. Phases 2–3 are the bulk,
-1–2 weeks. Phases 4–5 about a week. Then **calendar time**: no car has a history until swept twice,
-so the first real chart appears one sweep interval after Phase 6 begins and charts only look like
-charts after several. Reconcile lands last, after the baseline period — which is why the synthetic
-series stays up, marked, until then.
+Phases X, 0–1 and 4–5 are done. **Phases 2–3 are the bulk that remains, 1–2 weeks.** Then
+**calendar time**: no car has a history until swept twice, so the first real chart appears one
+sweep interval after Phase 6 begins and charts only look like charts after several. Reconcile
+lands last, after the baseline period — which is why the synthetic series stays up, marked,
+until then.
 
 ## Production state — verified 2026-07-19 by read-only SSH inspection
 

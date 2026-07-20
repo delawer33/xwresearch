@@ -90,8 +90,8 @@ the loop in `bulk_write()`.
   across workers: 100k docs ≈ 0.7 GB, 1M ≈ 7 GB. Multiply by worker count. The
   exonware-riyadh-01 box has ~15 GB and is multi-tenant.
 - **Anything unbounded in a document is an unbounded RAM cost**, because the whole collection is
-  resident. mawtarx's `versions` chain (`versioning.py`) grows forever and is the live example —
-  cap or downsample it before building a feature that grows it.
+  resident. mawtarx's `versions` chain was the live example and is now capped
+  (`versioning.cap_versions`) — cap or downsample before building a feature that grows a field.
 - **Every flush writes a `*.xwjson.backup.<ts>` copy and never removes it.** Over a long run this
   fills the disk; `mawtarx-connect/scripts/collect.py` hand-rolls pruning to survive it. Anything
   flushing on a cadence needs the same.
@@ -118,13 +118,17 @@ No cross-process coordination. No index persistence. No partial-collection write
 `update_many`. No connector matrix (that's `xwstorage-connect`, unwired, and its `EncryptionAtRest`
 is XOR — see `docs/tool-index.md`).
 
-## Unused capability worth knowing about
+## Time series — use this, don't grow a field
 
 `db.timeseries(name)` returns a `SeriesSet` of `(timestamp, value)` points with **range,
 downsample, and retention** built in, persisted under `{root}/timeseries/` as its own document —
-so appending to a series does *not* rewrite a listings collection. It is fully wired in the facade
-and **used by zero product repos**. Before hand-rolling any stored time series (price history,
-metric trends), use this instead of growing a field on a document.
+so appending to a series does *not* rewrite a listings collection. Before hand-rolling any stored
+time series, use this instead of growing a field on a document.
+
+First consumer: mawtarx's observed price history (`price_series.py`, series set `listing_prices`).
+Two edges it hit — `TimeSeries.points` is a **property** while `first`/`latest` are methods; and
+the set is written only on `close()`/`save_timeseries()`, so a crash loses points a `wal`
+collection would have kept. Persist it on the same cadence as your flush.
 
 ## More
 

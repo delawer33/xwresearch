@@ -14,7 +14,7 @@ reinvented. **Status** tells you whether the tool is proven in this product or j
 | Persist product data (the actual database) | `xwstorage-db` (`exonware.xwstorage.db`) | **live** — most-imported storage surface. **Read [`xwstorage-db-guide.md`](xwstorage-db-guide.md) before any write-path or capacity work** — the default durability is the slow one, and the write path takes no cross-process lock (a fencing-lease primitive exists but isn't wired in) |
 | Cross-process file lock (one writer at a time) | `xwsystem` (`io.FileLock`) | **live** — kernel `flock`/`msvcrt`, crash-safe, `SHARED`/`EXCLUSIVE`. Was `open(...,"x")`-based and broken until 2026-07; anything that hand-rolled a lockfile should use this |
 | Cross-process ownership with a fencing token (reject a resumed stale writer) | `xwstorage-db` (`db.fencing.PartitionLease`) | **built, unwired** — stronger than a plain lock for single-writer stores; not yet exported or called by any write path |
-| Store a `(timestamp, value)` series (price history, metric trends) | `xwstorage-db` → `db.timeseries()` | **unwired** — range/downsample/retention built in, used by zero product repos. Don't hand-roll one |
+| Store a `(timestamp, value)` series (price history, metric trends) | `xwstorage-db` → `db.timeseries()` | **live** — mawtarx's observed price history (`price_series.py`). Range/downsample/retention built in; don't hand-roll one. `points` is a property, `first`/`latest` are methods |
 | Shared money/value type | `xwschema` (`Price`) | **live** — every core+api repo |
 | Per-entity-class schema registry + migrations | `xwschema.registry` | **live** — markibx-api mountables |
 | Login / sessions / tokens / MFA | `xwauth-identity` (`exonware.xwauth.id`) | **live** — all 3 API repos |
