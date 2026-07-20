@@ -1,9 +1,20 @@
 # Plan — make listing price history real
 
 **Goal:** a car detail page shows that car's actual observed asking-price history.
-**Status:** Phase X-A and Phase 1 landed 2026-07-19. Written 2026-07-19.
+**Status:** Phase X (A, B, **D**) and Phase 1 landed; Phase 0.6 landed. Written 2026-07-19,
+extended 2026-07-20.
 
-## Landed so far (2026-07-19)
+## Landed so far
+
+### 2026-07-20
+
+| Item | What changed | Evidence |
+|---|---|---|
+| X-D | **Scheduling now lives in `xwsystem`** (`scheduling/` subpackage, `3cf5558`). `ISchedule`/`IRunLedger` Protocols, `XwSchedule` (interval + restricted cron, injected clock, catch-up-immediately), `InMemoryRunLedger` (default kept in xwsystem so the lib never imports a store to satisfy the contract). Generalized from `connector_cron.py` + `daemon_schedule.py`, which stay in place until Phase 3 consumes the xwsystem version. | 44 core tests incl. a seeded property loop; `PYTHONPATH=src pytest tests/0.core/scheduling`. |
+| X-A (DB half) | **`PartitionLease` fencing wired into the engine write path** (`xwstorage-db` `e47d3bd`), opt-in via `options={"fencing": …}`. Off by default (existing consumers byte-identical). When on: open takes the lease (fencing a stale owner), every write renews-or-revalidates the token, a stolen partition fails the writer loudly, close releases. This is the "DB wants the fencing token, not plain `FileLock`" decision, resolved. | 5 wiring tests incl. a controlled-clock stolen-partition case; 0.core 263 passed (2 pre-existing FORMAT_ERROR reds unrelated). |
+| 0.6 | **A scrape sweep persists in one write, not per row.** `ScrapingPersistenceAdapter` holds one `bulk_persist()` block per run; `XwStorageDbVehicleStore.upsert` now defers inside a bulk block (it wrote through unconditionally before) and coalesces via `bulk_write()`. Required a small `xwapi` fix (`37697fc`): `BaseScraper.run` now calls `flush()` in `finally`, so a batch is never lost when fetch aborts mid-sweep. | mawtarx `61a5c70` (3 tests, full suite 220 green); xwapi `37697fc` (2 tests incl. fatal-fetch). |
+
+### 2026-07-19
 
 | Item | What changed | Evidence |
 |---|---|---|
@@ -50,8 +61,8 @@ A first draft of this plan built generic infrastructure inside `mawtarx`, which 
 | | What | Where | Why it isn't product-layer |
 |---|---|---|---|
 | A | Named cross-process lock | **xwsystem** | ✅ **LANDED** (`5be433c`). Correction to the original claim: xwsystem *had* a `FileLock`, but it acquired via `open(path,"x")` and never released on crash — so this was a **repair**, not a port of `SourceLock`. It now uses `fcntl.flock`/`msvcrt`. **Second correction:** xwstorage-db is *not* without cross-process safety — `fencing.py`'s `PartitionLease` (a fencing-token lease, `O_EXCL`-based, predates this work) already exists and is crash-safe as of `02126e4`. So "one primitive closes both" was wrong: they are two primitives for two problems (see item 1 below). |
-| B | `update_many` / bulk upsert | **xwstorage-db** | ⚠️ **partly superseded.** `bulk_write()` already landed (`4bf74cd`) and coalesces N updates into one collection-file write (measured 72×). A separate `update_many` may no longer be worth adding — evaluate whether wrapping the loop in `bulk_write()` is enough before writing more. |
-| D | Interval + cron scheduling, run ledger | **xwsystem** | `mawtarx-api/connector_cron.py` is already fully generic — cron validation, matching, next-run — merely misfiled. Generalized from three implementations, not one. |
+| B | `update_many` / bulk upsert | **xwstorage-db** | ✅ **resolved: `bulk_write()` suffices.** It coalesces N updates into one collection-file write (measured 72×); Phase 0.6 consumed it. A distinct `update_many` was evaluated and skipped — no benefit over `bulk_write()`. |
+| D | Interval + cron scheduling, run ledger | **xwsystem** | ✅ **LANDED** (`3cf5558`) as the `scheduling/` subpackage. `connector_cron.py`'s generic logic was fully generic and merely misfiled; the xwsystem version generalizes it + `daemon_schedule.is_overdue`. |
 | — | Service-to-service auth | **xwbase** (reuse) | `XWBASE_SERVICE_TOKEN` is already in the prod env. Not a decision, just don't reinvent it. |
 
 **Stays in mawtarx** — genuinely car-domain: sweep profiles, reconcile safety, connector semantics,
@@ -79,21 +90,21 @@ versioning rule still allows a MINOR correction if the first consumer reshapes t
    > **not** `FileLock`. `PartitionLease` is crash-safe now but still **unexported and unwired**;
    > wiring it into `engine.py` is its own task. Do not have xwstorage-db import `FileLock` just to
    > satisfy the original plan text — that would be the weaker tool.
-2. **B — bulk update in xwstorage-db. ⚠️ mostly already present.** `bulk_write()` (`4bf74cd`)
-   coalesces many updates into one collection-file write. Before adding a distinct `update_many`,
-   confirm it buys anything `bulk_write()` doesn't; then move `ScrapingPersistenceAdapter`
-   (`mawtarx/store.py`) off per-record `upsert()` onto whichever primitive wins.
-3. **D — scheduling in xwsystem.** ⬜ **not started — this is the next real build.** Contract-first
-   (`contracts.py` Protocols, per I→A→XW). Move
-   `connector_cron.py`'s generic logic and `daemon_schedule.is_overdue`. Reuse the existing
-   `ProcessPool`, `CircuitBreaker`, `RetryConfig` rather than writing new ones.
-   > **Dependency trap:** xwsystem must never import xwstorage-db — that reverses the arrow. So the
-   > run ledger is a **Protocol** in xwsystem plus a trivial in-memory default; the persistent,
-   > xwstorage-db-backed implementation lives in the product layer. Getting this wrong is worse than
-   > leaving the scheduler in mawtarx.
-4. Scope discipline: xwsystem gets *when should this run*, *is it already running*, *what happened
-   last time*. Nothing else. Prove it with exactly one consumer (mawtarx-connect) before any other
-   repo adopts it, so first real usage can still change the API.
+2. **B — bulk update in xwstorage-db. ✅ resolved: `bulk_write()` is enough, no `update_many`.**
+   `bulk_write()` (`4bf74cd`) coalesces many updates into one collection-file write; Phase 0.6
+   moved `ScrapingPersistenceAdapter` onto it via the store's `bulk_persist()` block. A distinct
+   `update_many` was evaluated and skipped — it buys nothing over wrapping the loop in
+   `bulk_write()`, and pre-1.0 the guides say don't add surface you don't need.
+3. **D — scheduling in xwsystem. ✅ DONE (`xwsystem` `3cf5558`).** Contract-first as planned:
+   `ISchedule`/`IRunLedger` Protocols, `XwSchedule`, `InMemoryRunLedger`. The dependency trap was
+   honoured — the run ledger is a Protocol + in-memory default in xwsystem; a durable
+   xwstorage-db-backed ledger is a product-layer impl not built yet (Phase 3 wires it).
+   `connector_cron.py`/`daemon_schedule.py` are **not yet deleted** — they keep running the live
+   API until Phase 3's runner consumes the xwsystem version, so nothing regresses in between.
+4. Scope discipline (held): xwsystem got *when should this run*, *is it already running (ledger
+   RUNNING state + the caller's lock)*, *what happened last time*. No executor, no process pool, no
+   retry policy. First real consumer is Phase 3's `mawtarx_connect.runner`; the API can still change
+   until then.
 
 **Done when:** each has tests at foundation-library standard — the clock injected, schedule
 sequences property-tested, and cross-process behaviour proven with a real second process (as
@@ -105,12 +116,15 @@ At prod size a single write costs ~190 ms of GIL-held whole-collection serializa
 default `sync` durability.
 
 5. Set `MAWTARX_DB_DURABILITY=wal` for mawtarx-api. Deploy config, not code (`wal` not `batch`:
-   same speed, no crash window).
-6. Move `ScrapingPersistenceAdapter` (`mawtarx/store.py:759-781`) off per-record `upsert()` onto
-   the batch primitive from Phase X item B (`bulk_write()`, or `update_many` if it earns its place).
+   same speed, no crash window). ⬜ Still outstanding (deploy, not code).
+6. ✅ **DONE** (`mawtarx` `61a5c70` + `xwapi` `37697fc`). `ScrapingPersistenceAdapter` is off
+   per-record `upsert()` — it holds one `bulk_persist()` block per sweep and the DB store coalesces
+   the batch into one `bulk_write()`. See the 2026-07-20 landed table.
 
 **Done when:** 1,000 records ingested into a 15k-row store in seconds not minutes, and mawtarx-api
-p99 latency is unchanged during ingest. Measure, don't assume.
+p99 latency is unchanged during ingest. ⬜ **Not yet measured** — the code path exists and is
+unit-proven (one write per sweep), but the end-to-end timing on a 15k store still needs measuring,
+and depends on item 5's `wal` durability being set. Measure, don't assume.
 
 ## Phase 1 — Disarm reconcile (live today) — ✅ CODE LANDED (`mawtarx-api` `454c42e`)
 
