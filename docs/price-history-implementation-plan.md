@@ -1,9 +1,11 @@
 # Plan — make listing price history real
 
 **Goal:** a car detail page shows that car's actual observed asking-price history.
-**Status:** Phase X (A, B, **D**), Phase 0.6, Phase 1, and **Phases 4–5** landed. Remaining:
-Phase 2 (ingest), Phase 3 (runner), Phase 6 (rollout), plus two deploy-config items. Written
-2026-07-19, extended 2026-07-20.
+**Status:** Phase X (A, B, **D**), Phase 0.6, Phase 1, **Phases 4–5**, and now **Phases 2–3**
+(ingest contract + scraper runner) all landed and committed. Phases 2–3 are built and verified
+**locally**, **not yet rolled out** (mawtarx-api `b1df4a7`/`9c87118`, mawtarx-connect
+`c7e50e2`/`2242489`). Remaining: **Phase 6 rollout** plus two deploy-config items. Written
+2026-07-19, extended 2026-07-20; Phases 2–3 landed + stress-tested locally 2026-07-22.
 
 ---
 
@@ -18,8 +20,11 @@ guards a destructive path:
 - `MAWTARX_SCHEDULE_RUNNER=0` (Phase 1 item 7) — the runner *is* running in prod; it fires nothing
   today only because `connector_schedules.xwjson` is empty.
 
-**Then Phase 2 → 3 → 6, in that order.** They're sequential: nothing to run until the ingest
-contract exists, nothing to roll out until something runs.
+**Phases 2 and 3 now exist and pass locally** (ingest contract + scraper runner, committed;
+stress-tested 2026-07-22 — see the landed table). What's left is **Phase 6 rollout** and the two
+deploy items above; there is nothing left to *build* on the sequential path, only to measure and
+roll out. **`mawtarx-api#1` fixed 2026-07-22** (see the landed table) — the degraded-parse title
+overwrite is closed; no other S4 gap is known.
 
 **Read before writing pipeline code:** `docs/price-history-test-strategy.md`. Two of its four
 design prerequisites are already built and waiting for you —
@@ -43,6 +48,35 @@ that endpoint is small and belongs with Phase 2.
 ---
 
 ## Landed so far
+
+### 2026-07-22 — Phases 2–3 landed + stress-tested locally
+
+The ingest contract and the scraper runner both landed and committed, then were driven
+end-to-end against a live local mawtarx-api. This is **local verification, not a rollout** — prod
+is untouched and Phase 6 still governs going live.
+
+| Item | What changed | Evidence |
+|---|---|---|
+| 10–14 | **Phase 2 ingest contract** — scraper POSTs sweeps, mawtarx-api is sole writer. | mawtarx-api `b1df4a7` + `9c87118`; `tests/test_ingest_pipeline.py`, `test_ingest_routes.py`. Live: ingest ~841 rec/s vs a 7.5k store. |
+| 15–20 | **Phase 3 scraper runner** — own process, POSTs batches, never opens the DB; sweep profiles, retired SourceLock. | mawtarx-connect `c7e50e2` + `2242489`. Live: a real syarah sweep → records land → indicative→observed flip works. |
+| — | **Invariant coverage exercised** against the live pipeline: S1/S2/S3 (reconcile armed), S5, C1–C5, R1, R3, B2 passed; **R2** (interrupt + re-run == clean end state) passed via synthetic ingest. | `tmp/synth_*.py`. |
+| — | **S4 hole found (edge 3).** S4 holds for price + mileage (numeric merge guards), but a degraded parse with an empty title triggers `mapping.py`'s `title = payload.title or f"{year} {make} {model}"` synthesis; the fallback is truthy and defeats the merge's `incoming.title or existing.title` guard, overwriting a good stored title with a generic one. Narrow (needs identity fields to survive the same break). | **`mawtarx-api#1`**; regression `tmp/synth_s4.py` (RED until fixed). |
+
+**Connector reality (not bugs):** 5 of 7 Saudi sources scrape live (syarah, opensooq, saudisale,
+sayarat, samaco); haraj=0 (WAF, gated behind `KARAA_ENABLE_HARAJ`) and motory=0
+(`ConnectorType.DISABLED`) are intentional gating.
+
+### 2026-07-22 — `mawtarx-api#1` fixed: title fallback moved off the merge path
+
+The synthesized `{year} {make} {model}` title fallback was in `record_to_listing` — it ran on
+*every* observation, not just the first, so `incoming.title` was never falsy by the time
+`_merge_listing_fields`'s `incoming.title or existing.title` guard saw it. Moved the fallback to
+`store.upsert()`'s `existing is None` (first-insert) branch; a merge now sees the raw, possibly
+empty, incoming title and the existing guard protects it correctly. D-008.
+
+| Item | What changed | Evidence |
+|---|---|---|
+| — | Title fallback synthesized on first insert only, never inside `record_to_listing`. `_merge_listing_fields`'s guard is unchanged — it was always correct, just previously unreachable for title. | mawtarx `src/exonware/mawtarx/store.py`; `tests/test_title_fallback_merge_guard.py` (4 tests incl. the combined price+mileage+title-survive-a-legit-price-change case, red before / green after — supersedes the ephemeral `tmp/synth_s4.py`). Full suite: 5 pre-existing failures unchanged (env: `exonware.xwaction.caching` missing in this venv), no new failures. |
 
 ### 2026-07-20 — Phases 4 + 5
 
@@ -241,9 +275,10 @@ rest of a source's active inventory SOLD.
 > per-source baseline (Phase 2 item 14) — is **not built yet**. Until it is, nothing reconciles at
 > all, which is the safe state.
 
-## Phase 2 — The ingest contract
+## Phase 2 — The ingest contract — ✅ CODE LANDED (mawtarx-api `b1df4a7` + `9c87118`), locally verified, not yet rolled out
 
-The scraper never opens the database. mawtarx-api stays the only writer.
+The scraper never opens the database. mawtarx-api stays the only writer. (Items 10–14 below built
+and committed; see the 2026-07-22 landed table.)
 
 10. Batch payload: `{source, sweep_id, batch_id, profile, raw_count, records: [...]}`.
 11. `POST /ingest/batch`, authenticated via **xwbase service tokens**. Validate, enqueue on a
@@ -256,7 +291,7 @@ The scraper never opens the database. mawtarx-api stays the only writer.
     is exactly what per-batch reconciliation gets wrong. Gated on `should_skip_reconcile` against a
     persisted per-source baseline, and only for a completed `full` profile sweep.
 
-## Phase 3 — The scraper runner
+## Phase 3 — The scraper runner — ✅ CODE LANDED (mawtarx-connect `c7e50e2` + `2242489`), locally verified, not yet rolled out
 
 Nothing schedules scraping any more: `daemon.py` and `collect_incremental.py` were **deleted
 2026-07-19** with the SQL backend they required, and `collect.py` is now collect-only. This phase
@@ -307,11 +342,12 @@ listings on `indicative` until Phase 2/3 forwards the endpoint.
 
 ## Effort and the honest timeline
 
-Phases X, 0–1 and 4–5 are done. **Phases 2–3 are the bulk that remains, 1–2 weeks.** Then
-**calendar time**: no car has a history until swept twice, so the first real chart appears one
-sweep interval after Phase 6 begins and charts only look like charts after several. Reconcile
-lands last, after the baseline period — which is why the synthetic series stays up, marked,
-until then.
+Phases X, 0–5 are done — **Phases 2–3 landed and are verified locally** (2026-07-22), so the
+build work is essentially complete. **What remains is Phase 6 rollout**, the two deploy-config
+items, and fixing `mawtarx-api#1` before real markup breaks hit prod. Then **calendar time**: no
+car has a history until swept twice, so the first real chart appears one sweep interval after
+Phase 6 begins and charts only look like charts after several. Reconcile lands last, after the
+baseline period — which is why the synthetic series stays up, marked, until then.
 
 ## Production state — verified 2026-07-19 by read-only SSH inspection
 

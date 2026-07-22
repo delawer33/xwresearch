@@ -12,6 +12,25 @@ to a few lines — link the deep doc, don't inline it.
 
 ---
 
+## D-008 — the never-empty title fallback lives on first insert only, never in `record_to_listing`
+
+**2026-07-22** · The synthesized `{year} {make} {model}` title fallback moved from
+`record_to_listing` (runs on every observation) to `store.upsert()`'s `existing is None` branch
+(runs only on a listing's first insert).
+
+**Why:** `record_to_listing` synthesized the fallback unconditionally, so `incoming.title` was
+never falsy by the time it reached `_merge_listing_fields`'s own guard
+(`existing.title = incoming.title or existing.title`). A source whose title selector degraded —
+identity fields (make/model/year) still parsing, title parsing empty — silently replaced a rich
+stored title with a generic one on every re-scrape. Numeric fields (price, mileage) were never
+exposed because they have no such fallback. Filed as `mawtarx-api#1` (S4 gap, test-strategy edge
+3); see `docs/price-history-test-strategy.md`.
+
+**Code:** `repos/mawtarx/.../store.py` — fallback in `upsert()`, guard unchanged in
+`_merge_listing_fields`. Regression: `tests/test_title_fallback_merge_guard.py`.
+
+---
+
 ## D-007 — price estimates are computed on write and stored, never on read
 
 **2026-07-18** · `store.upsert()` prices a listing and stores the estimate + deal score on it
