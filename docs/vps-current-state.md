@@ -56,14 +56,11 @@ The six servers were **active** and every API health endpoint returned **HTTP 20
 verification time (2026-07-17); host up 15 days. karaa-api reports
 `{"status":"ok","version":"0.0.2","listings":15473,"listings_mode":"hybrid"}`.
 
-**`mawtarx-scraper-runner`** is the **only process that scrapes** (confirmed live on the VPS
-2026-07-23). It runs `python -m exonware.mawtarx_connect.runner --poll-seconds 300`, opens no
-DB, and POSTs each sweep to `mawtarx-api` over HTTP with a scoped `listings.write` service
-token — kept a separate process so scraping CPU never competes with mawtarx-api's single event
-loop. It has **no health endpoint** (it's a client, not a server); check it with
-`journalctl -u mawtarx-scraper-runner`. Details in the unit file
-`repos/mawtarx-connect/deploy/mawtarx-scraper-runner.service`. The row values above (venv/user/
-state dir) are per that unit file.
+**`mawtarx-scraper-runner`** — the only process that scrapes (confirmed live 2026-07-23), running
+`python -m exonware.mawtarx_connect.runner --poll-seconds 300`. No port, **no health endpoint**
+(client, not server): check via `journalctl -u mawtarx-scraper-runner`. What/why it exists:
+`ARCHITECTURE.md`. Row values above are per its unit file
+`repos/mawtarx-connect/deploy/mawtarx-scraper-runner.service`.
 
 ExecStart is a console entry / `python -m …cli --host 127.0.0.1 --port <port>` for
 each (e.g. `karaa-api --host 127.0.0.1 --port 8132`;

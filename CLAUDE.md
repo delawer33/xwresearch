@@ -40,12 +40,10 @@ axes, and it's easy to spend a month entirely in P3 without noticing.
 2. **Verify against synced code, not prose.** A doc's claim is a hypothesis until you check.
    Repos go stale, live repos go missing from `repos/`, deleted files linger on disk — each looks
    exactly like "this doesn't exist." Run **`/pull-repos`** first, and check the running server
-   when that's cheaper than reading. **To answer what _runs_ in prod (daemons, cron, workers),
-   read deploy artifacts — `deploy/*.service`, `pyproject.toml [project.scripts]`,
-   `docs/vps-current-state.md` — not the import graph. A separate-process worker is launched by
-   systemd via an entry-point and is invisible to any `grep src/`; a "no daemon / nothing runs"
-   claim is a hypothesis to _falsify_ against those files.** (The `mawtarx-scraper-runner` unit
-   was missed exactly this way — see `ARCHITECTURE.md` and the scraper-daemon memory.)
+   when that's cheaper than reading. **What _runs_ in prod (daemons/cron/workers) is invisible to
+   `grep src/`** — a systemd-launched worker imports into nothing. Check `deploy/*.service`,
+   `pyproject.toml [project.scripts]`, `docs/vps-current-state.md`; treat "no daemon / nothing
+   runs" as a claim to _falsify_, not a fact. (A live scraper daemon was missed exactly this way.)
 
 3. **Local ≠ production.** Your data and the server's differ a lot — never reason about prod from
    your local store.
