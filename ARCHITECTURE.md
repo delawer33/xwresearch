@@ -13,7 +13,9 @@ mawtarx wiring). `listings_mode` decides how much of mawtarx karaa serves: `hybr
 its own xwjson data **with mawtarx-api's listings** over HTTP, `local` serves only its own
 (prod read `local` on 2026-07-18 — verify via `/health`, and see the deploy skill). Card
 price/deal is **read from the listing** (D-007); the standalone `/pricing`+`/deals` routes
-**proxy** to mawtarx-api. `markibx-api` is unused.
+**proxy** to mawtarx-api. `markibx-api` is **not called by kara-api** (which resolves markibx
+in-process via mawtarx) — but it's a **live, public** service in its own right, serving
+markibx.com and markibx-web. Don't read "not called by kara-api" as "stub" or "dead".
 Deploy/config detail: `docs/vps-current-state.md`; code detail: `repos/kara-api/CLAUDE.md`.
 
 karaa is in development right now.
@@ -43,8 +45,8 @@ karaa is in development right now.
 | **`mawtarx-scraper-runner`** (systemd unit, no repo of its own) | **The process that actually scrapes** — `mawtarx-runner` script → `mawtarx_connect.runner:SweepRunner.loop`. A separate process on purpose (never competes with mawtarx-api's event loop); opens no DB, POSTs sweeps to mawtarx-api with a `listings.write` token. Unit: `repos/mawtarx-connect/deploy/mawtarx-scraper-runner.service`. | **LIVE on VPS** (confirmed 2026-07-23) |
 | `mawtarx-web`                                  | Frontend for mawtarx.com                                                                                        | LIVE                                                    |
 | `markibx` (`exonware.markibx`)                 | Car knowledge base (specs/catalog); used in-process by mawtarx                                                  | **load-bearing** (via mawtarx)                          |
-| `markibx-api` (`exonware.markibx_api`)         | HTTP for markibx — port **8240**                                                                                | **mostly stub (501)**; unused — markibx runs in-process |
-| `markibx-connect` (`exonware.markibx_connect`) | Car-fact connectors (NHTSA / Wikidata) — the **library**                                                         | being built                                             |
+| `markibx-api` (`exonware.markibx_api`)         | HTTP for markibx — port **8240**. Real routes (catalog, mountables, mecha, contributions, auth, media), all `XWActionRouter`, **no 501 stubs**. Not called by kara-api (in-process via mawtarx); serves markibx-web directly. | **LIVE, public** (markibx.com/:8242) — populated catalog (~9.6k vehicles, 2026-07-23) |
+| `markibx-connect` (`exonware.markibx_connect`) | Car-fact connectors — the **library**. 58 source adapters, but only **NHTSA vPIC + Wikidata pull keyless**; the rest (CarAPI/JATO/ChromeData/…) need API keys and are **off**. | library; **no auto-crawler** (no daemon/cron — contrast `mawtarx-scraper-runner`). Catalog built **on-demand** via markibx-api `pull_car_sources` + seed-on-empty. |
 | `markibx-connect-api`                          | HTTP surface for markibx-connect — port **8244**. A `karaa-connect-api` upstream. Plain `APIRouter`.            | **LIVE service**                                        |
 | `markibx-web`                                  | Frontend for markibx.com (**not** gated at the edge, unlike karaa/mawtarx)                                       | LIVE                                                    |
 
