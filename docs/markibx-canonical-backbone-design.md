@@ -63,6 +63,19 @@ Scope is **global market**, not KSA/GCC — global breadth is intended, not nois
   (queue is human-submitted only now). Threshold starts conservative, tuned by observed
   false-merge rate — a setting, not a hardcoded constant.
 
+- **D4a — Model matching is containment-aware; superstring ⇒ gated merge (validated by
+  prototype).** A logic prototype (`prototypes/markibx-backbone/`, run `python3 tui.py --demo`)
+  drove D3–D6 by hand and surfaced a trap: whole-string similarity **mis-scores the dominant
+  fragmentation pattern**. `Camry Classical` vs `Camry` scores only ~0.50 (the extra word swamps
+  the ratio), so a single-threshold resolver files it as a **new_model** — creating a *fourth*
+  Camry variant, the opposite of the goal — while the genuinely-distinct `Aurion` sits at 0.36. A
+  lone scalar can't tell "same nameplate + descriptor" from "different car." Fix: matching tracks
+  **token containment** as a separate axis, and `resolve_model` has **three** outcomes, not two —
+  auto-link (near-exact/alias/typo), **gated `merge` proposal** (candidate nameplate ⊆ raw tokens,
+  *or* strong-but-uncertain fuzzy; a superstring **never** auto-links because aliasing is an
+  identity change per D2/D5), and `new_model` (nothing close). The claim/conflict engine (D6) was
+  driven the same way and **needed no change** — the tier ceiling already delivers gap-fill-only.
+
 ## Branch 1 (identity) — CLOSED. D1–D5 above.
 
 - **D6 — Wire the existing provenance/conflict framework BEFORE any depth source.** Big finding:
