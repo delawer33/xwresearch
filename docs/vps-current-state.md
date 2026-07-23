@@ -38,8 +38,9 @@ Read this before trusting anything below:
 
 ## The services (this ecosystem)
 
-Six long-running systemd services, each an isolated `/opt/<svc>/.venv`, each a
-dedicated unix user, all bound to loopback:
+Seven long-running systemd services — **six API servers + one outbound worker** — each an
+isolated `/opt/<svc>/.venv`, each a dedicated unix user. The six servers bind to loopback;
+the worker binds no port (it only POSTs out):
 
 | Service (systemd unit) | Port | venv | WorkingDir / data | User | Public route |
 |---|---|---|---|---|---|
@@ -49,10 +50,20 @@ dedicated unix user, all bound to loopback:
 | `markibx-api.service` | 8242 | `/opt/markibx-api/.venv` (**shared**) | `/var/lib/markibx-api` | `markibx-api` | markibx.com `/api/markibx/*` |
 | `markibx-connect-api.service` | 8244 | `/opt/markibx-api/.venv` (**shared with markibx-api**) | `/var/lib/markibx-api` | `markibx-api` | markibx.com `/api/markibx-connect/*` |
 | `xwauth-id-gate.service` | 8051 | `/opt/xwauth-id-gate/.venv` | `/opt/xwauth-id-gate` | `xwgate` | (internal — the site-gate) |
+| `mawtarx-scraper-runner.service` | — (no port) | `/opt/mawtarx-connect-api/.venv` (**reuses connect-api's**) | `/var/lib/mawtarx-runner` | `mawtarx-runner` | (none — outbound only) |
 
-All six units were **active** and every API health endpoint returned **HTTP 200** at
+The six servers were **active** and every API health endpoint returned **HTTP 200** at
 verification time (2026-07-17); host up 15 days. karaa-api reports
 `{"status":"ok","version":"0.0.2","listings":15473,"listings_mode":"hybrid"}`.
+
+**`mawtarx-scraper-runner`** is the **only process that scrapes** (confirmed live on the VPS
+2026-07-23). It runs `python -m exonware.mawtarx_connect.runner --poll-seconds 300`, opens no
+DB, and POSTs each sweep to `mawtarx-api` over HTTP with a scoped `listings.write` service
+token — kept a separate process so scraping CPU never competes with mawtarx-api's single event
+loop. It has **no health endpoint** (it's a client, not a server); check it with
+`journalctl -u mawtarx-scraper-runner`. Details in the unit file
+`repos/mawtarx-connect/deploy/mawtarx-scraper-runner.service`. The row values above (venv/user/
+state dir) are per that unit file.
 
 ExecStart is a console entry / `python -m …cli --host 127.0.0.1 --port <port>` for
 each (e.g. `karaa-api --host 127.0.0.1 --port 8132`;
