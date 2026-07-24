@@ -13,6 +13,19 @@ Terms agents keep re-deriving. Each fact has one home; this is the shortlist.
   `year == 0` = model-level parent (specs shared across years); `year > 0` = per-year
   child that inherits the parent and overrides only what changed.
 
+- **generation** *(MVP catalog model — [`docs/markibx-mvp-catalog-model.md`](markibx-mvp-catalog-model.md))* —
+  a model's design cycle: a year-range + manufacturer code (Camry `XV70`, 2018–2024). Specs
+  cluster at this grain — constant within a generation, changed between. The **canonical spec
+  unit** in the MVP model, promoting today's loose `generation` string / `year==0` parent to a
+  first-class node. Curate once per generation, not per year.
+
+- **market scope (global floor / market layers)** *(MVP catalog model)* — catalog specs are
+  stored per market. `global` holds only *market-invariant* facts (the shared floor); each
+  market (`GCC`, later `NA`…) is a sibling layer. A query in market M resolves `global ⊕ M`
+  (M wins). **Markets never override each other**, and `global` is filled only when a fact is
+  *verified* invariant (default is market-scoped). Launch price is per-`(generation, trim,
+  market)` in **native currency** (Plan B). GCC seeded first ≠ GCC is "the main market".
+
 - **price_sar** — a **derived display value, never stored and never serialized.** It is a
   field on `VehicleListing`, but `from_dict` always recomputes it from the native price
   (`to_sar_safe(price.val, price.cur, …)`), and `to_dict` deliberately omits it — it's

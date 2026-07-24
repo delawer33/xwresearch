@@ -12,6 +12,30 @@ to a few lines — link the deep doc, don't inline it.
 
 ---
 
+## D-009 — markibx stores launch price native, but its resolved output keeps `original_launch_price_sar`
+
+**2026-07-24 · design, not built** — for the markibx MVP catalog model
+(`docs/markibx-mvp-catalog-model.md`, decision D-d). markibx will *store* launch price
+structured and native, per `(generation, trim, market)` (`launch_price {amount, currency,
+market}`), consistent with D-002. But the **resolved-car output keeps emitting the flat
+`original_launch_price_sar`** field as a derived value (= the SAR-market amount).
+
+**Why:** mawtarx pricing's MSRP-depreciation method reads `original_launch_price_sar` *by that
+exact name* (`repos/mawtarx/.../pricing_methods/msrp_depreciation.py`, `catalog_msrp.py`). For
+the GCC MVP, native currency **is** SAR, so the number is identical — the compat field lets the
+new native-storage model ship with **zero mawtarx changes**. It is the real markibx→mawtarx
+contract, not a hack. The day a non-SAR market is added is the day pricing must learn currency
+(read structured `launch_price`) — a clean future step, not debt taken on now.
+
+**Supersedes:** markibx's current single `CatalogVehicle.original_launch_price_sar` *storage*
+field (an FX-derived SAR value that contradicts D-002). After this lands, `_sar` survives only as
+a **derived output**, never as the stored truth. **Relates to:** D-002 (Plan B, native currency).
+
+**Code:** not yet built. Design + build order: `docs/markibx-mvp-catalog-model.md`. Consumers to
+keep working: `repos/mawtarx/.../pricing_methods/{msrp_depreciation,catalog_msrp}.py`.
+
+---
+
 ## D-008 — the never-empty title fallback lives on first insert only, never in `record_to_listing`
 
 **2026-07-22** · The synthesized `{year} {make} {model}` title fallback moved from
