@@ -101,10 +101,15 @@ Example: [see the JSON in the grill thread / to be inlined once trims + sources 
    add inline per-field `{value, source, confidence}`. Add the `resolve(key, market)` seam
    (exact/normalized match now; honest "not in catalog" on miss). Keep `original_launch_price_sar`
    as a **derived output field** (D-d).
-2. **Derive N:** run `scripts/rank_gcc_models.py` on a prod GCC snapshot → the target model list.
+2. **Derive N + seed identity (2a):** run `scripts/rank_gcc_models.py` on a prod GCC snapshot →
+   the target model list → seed generation **identity** rows (make·model·generation, years,
+   markets). Mechanical, no brochures. **This is the gate** for a live console (`DECISIONS.md`
+   D-010).
 3. **Prefill:** NHTSA vPIC (+ optional Wikidata) into `fields.global` invariant fields only (D-e).
-4. **Curate:** OEM/brochure/dealer facts for each target generation → GCC layers, trims, native
-   launch price → committed **seed files** (D-f). Confidence from `TRUST_TIERS`.
+   Auto-fills the identity rows from step 2 — no human. **Built** (#26).
+4. **Curate (2b):** OEM/brochure/dealer facts for each target generation → GCC layers, trims,
+   native launch price → committed **seed files** (D-f). Confidence from `TRUST_TIERS`. **Depth
+   pass, not a gate** — runs continuously *after* the console is live (D-010).
 5. **Scoring:** feed the per-field confidence tags to the existing `quality.py` (it already
    averages them) so completeness + confidence are real, not 0.
 6. **markibx-api:** serve resolve/browse over the new model; miss → honest "not in catalog".
