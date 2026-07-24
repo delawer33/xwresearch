@@ -20,9 +20,11 @@ ssh -i $KEY shukri@149.104.105.145
 ```
 
 No CI/CD. No git on the server. Every deploy is: build locally → tar the working
-tree → scp → extract into a fresh staging dir on the VPS → `pip install
---force-reinstall --no-deps` into the right venv → restart the right systemd
-unit(s) → verify. `sudo` on the box is passwordless for `shukri`. Ignore the
+tree → scp → extract into a fresh staging dir on the VPS → install into the right
+venv → restart the right unit(s) → verify. **`sudo` is NOT passwordless** — it's
+scoped to three wrappers (`xw-backend-ctl`, `xw-backend-logs`, `xw-backend-setup`);
+see `vps-current-state.md`'s "Access" section for exactly what each covers and the
+ACL shortcut that often avoids `sudo` entirely. Ignore the
 `sudo: unable to resolve host exonware-riyadh-01` warning that prints on every
 sudo call — it's a DNS quirk, not a failure; the command still runs.
 
@@ -173,19 +175,24 @@ ssh -i ~/.ssh/exonware_riyadh_shukri_rsa shukri@149.104.105.145 '
 rm -rf /tmp/<repo>-deploy
 mkdir -p /tmp/<repo>-deploy
 tar -xzf /tmp/<repo>-src.tar.gz -C /tmp/<repo>-deploy
-sudo /opt/<correct-venv>/.venv/bin/pip install /tmp/<repo>-deploy --force-reinstall --no-deps
+/opt/<correct-venv>/.venv/bin/pip install /tmp/<repo>-deploy --force-reinstall --no-deps
 '
 ```
 
-Use the service map above to get `<correct-venv>` right — this is where the
-`/opt/kara-api` vs `/opt/karaa-api` mistake happens.
+No `sudo` needed — `shukri` carries a direct ACL on these venv dirs (confirmed on
+`/opt/mawtarx-api/.venv`; `Permission denied` on one that hasn't been granted yet is
+a real gap to raise, not something `sudo` can route around here). Use the service
+map above to get `<correct-venv>` right — this is where the `/opt/kara-api` vs
+`/opt/karaa-api` mistake happens.
 
 ### 4. Pre-restart sanity check — import it before you restart it
 
 The old process is still serving traffic at this point; a failure here costs
-nothing. Set the same env vars the real systemd unit sets (check
-`sudo cat /etc/<service>.env` for `XWJSON_ABI_LIB` etc. — several services
-need it to import `xwstorage`/`xwjson` at all):
+nothing. Set the same env vars the real systemd unit sets. You can no longer
+`sudo cat /etc/<service>.env` to check them (see `vps-current-state.md`'s
+"Access" section) — use its "Config wiring" table for the known ones
+(`XWJSON_ABI_LIB` etc. — several services need it to import `xwstorage`/`xwjson`
+at all), or ask someone with root for one that isn't documented there:
 
 ```bash
 ssh -i ~/.ssh/exonware_riyadh_shukri_rsa shukri@149.104.105.145 '
@@ -210,11 +217,11 @@ failing check.**
 
 ```bash
 ssh -i ~/.ssh/exonware_riyadh_shukri_rsa shukri@149.104.105.145 '
-sudo systemctl restart <service>          # restart every service sharing the venv, not just one
+sudo xw-backend-ctl restart <service>     # restart every service sharing the venv, not just one
 sleep 2
-sudo systemctl is-active <service>
+sudo xw-backend-ctl status <service>
 curl -s http://127.0.0.1:<port>/api/<prefix>/v1/health
-sudo journalctl -u <service> --since "2 minutes ago" --no-pager | grep -iE "error|traceback|exception"
+sudo xw-backend-logs <service> --since "2 minutes ago" --no-pager | grep -iE "error|traceback|exception"
 '
 ```
 
@@ -267,10 +274,45 @@ restart, don't assume the deploy caused it — check whether the underlying
 data file's mtime predates your restart:
 
 ```bash
-sudo ls -la /var/lib/<service>/data/... 2>&1
+ls -la /var/lib/<service>/data/... 2>&1   # try without sudo first — ACL often covers this
 ```
 
 A file untouched since before you started is not something you broke.
+
+## Standing up a brand-new service (not updating an existing one)
+
+Different flow — `xw-backend-setup` only bootstraps NEW services (unit/user name must start
+`karaa-`/`markibx-`/`mawtarx-`):
+
+```bash
+sudo xw-backend-setup ensure-user <name>       # creates the user + /var/lib/<name>,
+                                                # and grants shukri an ACL on it (rwx, inherited)
+# build the venv directly as shukri, no sudo:
+python3 -m venv /var/lib/<name>/venv
+/var/lib/<name>/venv/bin/pip install --find-links=<local wheelhouse> <package>
+# write .service/.timer under ~/ or /tmp, then:
+sudo xw-backend-setup install-env <name> <src-env-file>
+sudo xw-backend-setup install-unit <src-unit-file>
+sudo xw-backend-setup daemon-reload
+sudo xw-backend-setup enable <unit>
+sudo xw-backend-setup start <unit>
+```
+
+`User=` in the unit must be `<name>`, never `root`. **A fresh venv has none of the
+`exonware-*` packages an existing `/opt/*/.venv` already carries** — none are on public
+PyPI, so build the whole local dependency chain as wheels from `repos/` (one `pip wheel
+--no-deps -w <wheelhouse> <repo-path>` call per package; `pip install
+--find-links=<wheelhouse> <top-level-package>` then resolves the graph) and ship them
+together — public deps (`fastapi`, `httpx`, etc.) still resolve from PyPI normally
+alongside `--find-links`. Two real gaps to expect: `tomli_w` (xwsystem's TOML
+serializer) and `httpx` (xwapi's service client) are both imported eagerly by code that
+isn't supposed to require them just to *import* the package — install them explicitly
+rather than assuming a clean build means a clean import.
+
+For a one-off command as the new service's user (e.g. proving a dry-run before trusting
+the real unit), `sudo -u <name> <cmd>` does **not** work under the scoped sudo model.
+Wrap it in a small oneshot `.service` (`User=<name>`, `ExecStart=<cmd>`), `install-unit`
++ `start` it, then read the result with `xw-backend-logs`/`status`.
 
 ## Cleanup
 

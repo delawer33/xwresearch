@@ -13,7 +13,9 @@ mawtarx wiring). `listings_mode` decides how much of mawtarx karaa serves: `hybr
 its own xwjson data **with mawtarx-api's listings** over HTTP, `local` serves only its own
 (prod read `local` on 2026-07-18 — verify via `/health`, and see the deploy skill). Card
 price/deal is **read from the listing** (D-007); the standalone `/pricing`+`/deals` routes
-**proxy** to mawtarx-api. `markibx-api` is unused.
+**proxy** to mawtarx-api. `markibx-api` is not called by kara-api (kara-api resolves markibx
+in-process via mawtarx) — but it is a live, real service in its own right, consumed directly
+by markibx-web. Don't read "unused by kara-api" as "stub" or "dead".
 Deploy/config detail: `docs/vps-current-state.md`; code detail: `repos/kara-api/CLAUDE.md`.
 
 karaa is in development right now.
@@ -39,22 +41,23 @@ karaa is in development right now.
 | `mawtarx` (`exonware.mawtarx`)                 | Listings + intelligence core (pricing/deals/fraud/mojaz); resolves markibx in-process                           | **load-bearing** — prod pricing/deals/catalog           |
 | `mawtarx-api` (`exonware.mawtarx_api`)         | HTTP for mawtarx — port **8250**; kara-api proxies some car-intelligence endpoints here (current server config) | **load-bearing**, real                                  |
 | `mawtarx-connect` (`exonware.mawtarx_connect`) | Marketplace scrapers (625 registered) — the **library**                                                          | being built; **no crawl runs** (no collect/daemon, no cron) |
-| `mawtarx-connect-api`                          | HTTP surface for mawtarx-connect — port **8253**. A `karaa-connect-api` upstream. Plain `APIRouter`.            | **LIVE service** — up, even though no scraping runs     |
+| `mawtarx-connect-api`                          | HTTP surface for mawtarx-connect — port **8253**. A `karaa-connect-api` upstream. `XWActionRouter`.            | **LIVE service** — up, even though no scraping runs     |
 | `mawtarx-web`                                  | Frontend for mawtarx.com                                                                                        | LIVE                                                    |
 | `markibx` (`exonware.markibx`)                 | Car knowledge base (specs/catalog); used in-process by mawtarx                                                  | **load-bearing** (via mawtarx)                          |
-| `markibx-api` (`exonware.markibx_api`)         | HTTP for markibx — port **8240**                                                                                | **mostly stub (501)**; unused — markibx runs in-process |
+| `markibx-api` (`exonware.markibx_api`)         | HTTP for markibx — port **8240**. Real routes (catalog, mecha browse, auth, media proxy, mountables/identify/export/contributions), all `XWActionRouter`, no 501 stubs found. Not called by kara-api (which resolves markibx in-process) — but is consumed directly by markibx-web. | **LIVE**, real                                          |
 | `markibx-connect` (`exonware.markibx_connect`) | Car-fact connectors (NHTSA / Wikidata) — the **library**                                                         | being built                                             |
 | `markibx-connect-api`                          | HTTP surface for markibx-connect — port **8244**. A `karaa-connect-api` upstream. Plain `APIRouter`.            | **LIVE service**                                        |
 | `markibx-web`                                  | Frontend for markibx.com (**not** gated at the edge, unlike karaa/mawtarx)                                       | LIVE                                                    |
 
 ## The platform layer (xw*)
 
-18 shared libraries under `repos/xw*`. Each has its own `CLAUDE.md` stating what it is, when
-to reach for it, its **verified** used-by list, and its gotchas. **Only 8 are actually
-imported by product code** — the rest are available but unwired.
+18 shared libraries under `repos/xw*`. Most have their own `CLAUDE.md` stating what it is, when
+to reach for it, its **verified** used-by list, and its gotchas — the exceptions today are
+`xwrouter` (the live HTTP engine), `xwgis`, `xwstorage-db-api`, and `xwui` (README only). Only a
+minority are actually imported by product code; the rest are available but unwired.
 
-Task → library → status: **[`docs/tool-index.md`](docs/tool-index.md)**. Check it before
-building any utility.
+**How many are wired, and which, lives in one home: [`docs/tool-index.md`](docs/tool-index.md)** —
+task → library → status. Don't restate the count here; check that table before building any utility.
 
 **Two layouts.** Most libs are flat (`src/exonware/<pkg>/`). **xwschema, xwaction, xwquery,
 xwnode, xwmodels, xwentity, xwdata are polyglot** — Python at `ports/python/src/exonware/<pkg>/`,

@@ -27,19 +27,23 @@ author's record instead of the next reader's task.
    it rots. Say what *looks true and isn't*: the count that means something different from what
    you'd assume, the doc that calls itself authoritative and is half-stale, the class named `AES`
    that's XOR. That's the content only a doc can carry.
-3. **Never mirror the filesystem.** File-by-file / route-by-route tables rot on every commit and
+3. **Sacrifice grammar for density.** A doc is read by an agent, not graded by a teacher. Drop
+   articles, subjects, and connective prose when the fragment says it faster — "XOR, not AES"
+   beats "Note that this class actually implements XOR rather than the AES it claims to." Full
+   sentences are a tax; pay it only when the fragment would be genuinely ambiguous.
+5. **Never mirror the filesystem.** File-by-file / route-by-route tables rot on every commit and
    `ls` already does the job better. (A kara-api table once documented 2 deleted files and missed
    24 real ones.) Point at the code; don't inventory it.
-4. **One fact, one home; link, don't copy.** Copies drift, and then you have N truths.
-5. **Budget by read-frequency.** Cost = length × how often it's read. Root `CLAUDE.md` is paid on
+6. **One fact, one home; link, don't copy.** Copies drift, and then you have N truths.
+7. **Budget by read-frequency.** Cost = length × how often it's read. Root `CLAUDE.md` is paid on
    *every request* → ruthless. A repo `CLAUDE.md` is per-task → generous where it earns it. A
    reference doc is read rarely → it may stay long; just say what to trust in it.
-6. **Triggers, not pointers.** "See also X" never fires. "Before you write any code, read X" does.
-7. **Negative space is cheap and high-value.** "What does NOT exist here", "don't add engines
+8. **Triggers, not pointers.** "See also X" never fires. "Before you write any code, read X" does.
+9. **Negative space is cheap and high-value.** "What does NOT exist here", "don't add engines
    here", "NOT `../kara-connect`". One line that stops a wrong path beats a paragraph describing
    a right one.
-8. **Prune while you're in there.** Every edit is a chance to cut. Net-neutral or smaller, unless
-   you can say what the growth buys.
+10. **Prune while you're in there.** Every edit is a chance to cut. Net-neutral or smaller, unless
+    you can say what the growth buys.
 
 ## Shape of a repo `CLAUDE.md`
 

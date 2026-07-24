@@ -99,12 +99,12 @@ simultaneously.
 
 **Code:** `repos/kara-api/src/exonware/karaa_api/models.py:165` (the CC-002 comment).
 
-> **Provenance:** "CC-002" was never written into `repos/KARA_CONTRACT_CHANGES.md` (it has only
-> CC-001). It's cited from memory in three places, and they disagree — `models.py:165` and the
-> glossary mean the price decision above; `kara/CONTEXT.md` (deleted) meant an unrelated
-> "European/Slavic tier is first-class" call. That tier claim is unverified and homeless:
-> `git -C repos/kara show 97339d4:CONTEXT.md` if it matters. This entry records only the price
-> half, which is confirmed in code. The date is when it was *recorded*, not decided.
+> **On the "CC-002" label:** it's informal — cited from memory in code and the glossary, never
+> recorded in a formal contract-changes doc. **This entry is its authoritative record**, and
+> covers only the price decision above (advertised price stored as-is, `price_sar`
+> engine-internal, market-gap from `price_delta_sar`). An unrelated "European/Slavic tier"
+> call was once also tagged "CC-002" in a since-deleted `kara/CONTEXT.md`; that claim is
+> unverified and out of scope here. The date is when this was *recorded*, not decided.
 
 ---
 
@@ -119,7 +119,8 @@ native-currency price is dimensionally wrong. A fraction is unit-free and needs 
 **median** (38,100) was chosen as the anchor over the tail-inflated **mean** (97,566), which
 would under-adjust the bulk of listings. (`YEAR_RETAINED = 0.91` is already a ratio, unaffected.)
 
-**Deep doc:** `mawtarx-perkm-fraction-decision.md`.
+**Code:** `repos/mawtarx/src/exonware/mawtarx/pricing.py:58` (`FRAC_PER_KM = 0.18 / 38100.0`,
+`YEAR_RETAINED = 0.91`). The full derivation is inline above — this entry is self-contained.
 
 ---
 
@@ -139,7 +140,9 @@ a **ratio**, so the FX rate cancels for same-currency comparisons: `(a·r)/(b·r
 compare in SAR). Plan A is dead — do not reintroduce a stored `price_sar` or a SAR-denominated
 comparison.
 
-**Deep doc:** `mawtarx-fx-plan-B.md`. **Consequences:** D-003, D-004.
+**Code:** `repos/mawtarx/src/exonware/mawtarx/fx.py` (static USD/SAR pegs; its module header
+records this Plan-B decision). The measured rationale above stands on its own — no external doc.
+**Consequences:** D-003, D-004.
 
 ---
 
@@ -156,5 +159,6 @@ already knows. `resolved_spec.source` lets any client distinguish an observed va
 catalog-inherited one. Raw `listing.body_type` etc. are unchanged and never mutated by catalog
 resolution — strictly additive, no client breaks.
 
-**Deep doc:** `repos/KARA_CONTRACT_CHANGES.md` (CC-001);
-rationale in `repos/CATALOG_ENRICHMENT_DECISIONS.md`.
+**Design rationale:** `repos/CATALOG_ENRICHMENT_DECISIONS.md` (matching cascade, enrichment
+pipeline, confidence model). The client-contract surface (CC-001) is fully captured above —
+this entry is self-contained.

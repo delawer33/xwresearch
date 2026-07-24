@@ -115,6 +115,29 @@ Non-secret keys that define how the pieces talk (from `/etc/<svc>.env`):
 - **markibx-api** / **markibx-connect-api**: `MARKIBX_CATALOG_FILE=/var/lib/markibx-api/data/catalog.xwjson`,
   `MARKIBX_SEED_ON_EMPTY=1`, both `XWJSON_ABI_LIB=/opt/kara-api/libxwjson_abi.so`.
 
+## Access — sudo is scoped, not passwordless
+
+`shukri`'s sudo is limited to three NOPASSWD wrappers (`sudo -l` is the source of truth,
+re-check before trusting this — verified 2026-07-21): `xw-backend-ctl`
+(start/stop/restart/status on the six units above plus any `karaa-*`/`markibx-*`/`mawtarx-*`
+unit), `xw-backend-logs` (a `journalctl -u <unit> [args...]` wrapper), and `xw-backend-setup`
+— which only **bootstraps new** services (`ensure-user <name>`, `install-env <name> <src>`,
+`install-unit <src>`, `daemon-reload`, `enable|start|stop|restart|status <unit>`; names must
+start with `karaa-`/`markibx-`/`mawtarx-`). Plain `sudo cat`, `sudo -u <user>`, or any other
+`sudo <cmd>` fails (password required, none set).
+
+`ensure-user <name>` also grants `shukri` a default ACL (`rwx`, inherited by new files) on the
+new `/var/lib/<name>` — confirmed via `getfacl`. The same ACL pattern already existed on at
+least `/opt/mawtarx-api/.venv`, so **try a direct `pip install`/`ls` as `shukri` (no `sudo`)
+before assuming you need root** — several `/opt/*/.venv` dirs are already writable this way;
+an unverified one just gives `Permission denied`, which costs nothing to check.
+
+**Real gap:** no read or safe-incremental-write path exists for an *existing* service's env
+file (e.g. `/etc/mawtarx-api.env`, `600 root:root`). `install-env` only replaces a file
+wholesale and is scoped to new services; none of the three wrappers can `cat` one. Changing a
+var on a live service's env file needs a human with real root — don't blind-overwrite one with
+`install-env` guessing at its current contents.
+
 ## Data layer — flat-file xwjson
 
 Our stack stores everything in **xwjson flat files** under `/var/lib/<svc>/data/`
@@ -184,7 +207,8 @@ No CI/CD, no git on the server. Deploys are manual: build locally → tar the wo
 tree → scp → `pip install --force-reinstall --no-deps` into the right `/opt/*/.venv`
 → restart the right unit(s) → verify. The full, safety-checked procedure (and the
 per-service traps) lives in the **`deploy-vps` skill**
-(`.claude/skills/deploy-vps/SKILL.md`) — follow it rather than improvising.
+(`.claude/skills/deploy-vps/SKILL.md`) — follow it rather than improvising. See
+"Access" above for what needs `sudo` vs. what `shukri`'s ACL already covers.
 
 ## Ports: dev default vs. what this box runs (not drift — two environments)
 

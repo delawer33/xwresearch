@@ -49,4 +49,4 @@ Terms agents keep re-deriving. Each fact has one home; this is the shortlist.
   hydrate an empty estimate. `None` means *not yet priced*, never "no comparables". D-007.
 
 - **CC-002** — contract decision: advertised price stored as-is, FX is the frontend's job; see
-  `price_sar` above. Record: `DECISIONS.md` D-004 — **not** `repos/KARA_CONTRACT_CHANGES.md`.
+  `price_sar` above. Authoritative record: `DECISIONS.md` D-004 (the "CC-002" label is informal).

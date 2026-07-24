@@ -21,7 +21,7 @@ reinvented. **Status** tells you whether the tool is proven in this product or j
 | Signed image-thumbnail proxy (no hotlinking) | `xwbase` (`.media`) | **live** — all 3 API repos |
 | HTTP fetch with rate-limit/policy for a connector | `xwapi.scrapping` | **live** — mawtarx-connect, markibx-connect |
 | HTTP route | `xwapi` (`APIRouter`) | **live** — engine comes from xwbase's switch; prod resolved to `xwrouter` 2026-07-18, FastAPI is the fallback |
-| One decorator = HTTP endpoint + native WebSocket-RPC | `xwapi`'s `XWActionRouter` (built on `xwaction`) | **live and now the default** — kara-api runs 43 files on it; karaa-connect-api is 100%. mawtarx-api / markibx-api still plain `APIRouter`. Use it for new routes. |
+| One decorator = HTTP endpoint + native WebSocket-RPC | `xwapi`'s `XWActionRouter` (built on `xwaction`) | **live and now the default** — kara-api, karaa-connect-api, mawtarx-api, mawtarx-connect-api, and markibx-api are all on it. markibx-connect-api is the one holdout (plain `APIRouter`, routes defined inline in `app.py`, no `routes/` package). Use `XWActionRouter` for new routes. |
 | Scoped auth on a route | `xwapi.fastapi_routes.require_scopes` | **live** |
 | Cached endpoint response | `xwapi.caching` (`XWApiCache`, `cached_endpoint`) | **live** — kara-api |
 | Federate login to an external IdP (Google, etc.) | `xwauth-connect` | **unwired** — nothing federates today |
