@@ -12,6 +12,22 @@ to a few lines — link the deep doc, don't inline it.
 
 ---
 
+## D-013 — xwmemory keeps graphiti_core's extraction; we replaced only the storage layer
+
+**2026-07-26 · scope** — xwmemory's whole tool surface (`add_memory`, both search tools) now
+delegates to `graphiti_core`'s pipeline over our `XWMemoryGraphDriver`, rather than growing an
+in-house extraction/dedup/ranking stack. The brief was always *replace FalkorDB*, not replace
+Graphiti; reimplementing LLM extraction, dedup and bi-temporal edge invalidation buys
+independence nobody asked for and duplicates upstream forever.
+
+**Consequences that will look like bugs if you don't know this:** there is **no storage-only
+mode left** — the tool surface hard-requires the `[graphiti]` extra plus a reachable
+LLM/embedder, and search fails loudly rather than degrading to BM25. Extraction *quality* is
+therefore a model/ontology question, not an xwmemory one (Exonware/xwmemory#9).
+
+Rejected: our own LLM pipeline; non-LLM extraction. Repo detail + the A2a follow-up live in
+`repos/xwmemory/docs/logs/DECIDE_20260726_113000_000_ADD_MEMORY_DELEGATES_TO_GRAPHITI.md`.
+
 ## D-012 — the spine seed loads fail-soft, and seed validation gates the deploy
 
 **2026-07-24 · robustness** — for landing the catalog spine in prod. Two coupled calls:

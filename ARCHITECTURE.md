@@ -62,11 +62,14 @@ task → library → status. Don't restate the count here; check that table befo
 **Two layouts, and polyglot is now the majority** (re-derived 2026-07-26 — the old "most are
 flat" claim was stale). Import paths are normal either way; only the *file* paths differ.
 
-- **Polyglot (16)** — Python lives at `ports/python/src/exonware/<pkg>/`: `xwaction`, `xwapi`,
+- **Polyglot (17)** — Python lives at `ports/python/src/exonware/<pkg>/`: `xwaction`, `xwapi`,
   `xwauth`, `xwauth-identity`, `xwbase`, `xwbots`, `xwchat`, `xwdata`, `xwentity`, `xwmemory`,
-  `xwmodels`, `xwnode`, `xwquery`, `xwrouter`, `xwschema`, `xwstorage`.
-- **Flat (9)** — `src/exonware/<pkg>/`: `xwauth-connect`, `xwencrypt`, `xwjson`, `xwscript`,
-  `xwstorage-connect`, `xwstorage-db`, `xwstorage-db-api`, `xwsyntax`, `xwsystem`.
+  `xwmodels`, `xwnode`, `xwquery`, `xwrouter`, `xwschema`, `xwstorage`, `xwstorage-db`.
+- **Flat (8)** — `src/exonware/<pkg>/`: `xwauth-connect`, `xwencrypt`, `xwjson`, `xwscript`,
+  `xwstorage-connect`, `xwstorage-db-api`, `xwsyntax`, `xwsystem`.
+
+`xwstorage-db` **moved flat → polyglot on 2026-07-26** and no longer has a root `pyproject.toml`.
+An editable install pointing at the repo root silently goes stale; install from `ports/python`.
 - **No Python at all (3)** — `xw3d`, `xwgis`, `xwui` are JS/TS packages.
 
 Two traps in the grep, both real:

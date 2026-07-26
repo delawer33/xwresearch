@@ -38,6 +38,12 @@ Then **verify against code, not prose**:
 look identical to "this doesn't exist." That skill exists because all three fired at once; its
 "Why this exists" has the full story if you want it.
 
+**A matching version string is not proof the API matches.** `xw*` repos reuse a version across
+many commits — xwstorage-db sat 19 commits behind at an unchanged `0.0.1.7` while gaining the
+`allow=` parameter xwmemory called. The pin looked clean; the tree was stale. So: **"this
+parameter/function doesn't exist" is not a finding until you've fetched that repo.** Writing it
+up as API drift sends the next agent to "fix" correct code.
+
 Three ways a grep lies about usage:
 - **stale** — the repo moved; you're reading last month's code.
 - **absent** — the repo isn't cloned, so the feature is invisible.
@@ -123,6 +129,25 @@ payload shape it holds for. Budgets live in each repo's `docs/REF_54_BENCH.md`.
 
 `/self-review` (your own just-finished change, read as a hostile reviewer) and `/code-review`
 (the working diff). Security findings block; see `GUIDE_64_SECURITY.md` for depth.
+
+## 6b. Delegating to subagents
+
+Every rule here was paid for in wall-clock on the xwmemory build (2026-07-26, 7 slices).
+
+- **They can't invoke `disable-model-invocation` skills.** Inline the loop you want instead of
+  naming a skill they'll silently fail to load.
+- **Forbid `SendMessage` in reviewers:** *"your final response text IS your report, just end your
+  turn."* Reviewers otherwise burn cycles retrying sends to a parent name that doesn't resolve.
+- **Forbid idling in coordinators:** *"don't wait on reviewers — write your report while they
+  run; if one doesn't land, do that axis yourself."* Agents wait politely and invisibly.
+- **Carry the previous slice's lessons into the next slice's prompt.** Cheap, and it's what made
+  later agents delete their own unproven work instead of shipping it.
+- **Two-axis review in parallel** (Standards + Spec, `/code-review`'s split) catches what one
+  misses — a stale doc rule contradicting correct code, a fingerprint that could eat real data.
+- **Verify their claims yourself**: re-run the suite, read the risky predicate, trace the API
+  they say is missing. Sound reasoning on a false premise reads exactly like a real finding.
+- **One tree, one agent.** Slices sharing a working tree must run sequentially; parallelism needs
+  worktree isolation, and a shared `.venv` makes that non-trivial. Plan for sequential.
 
 ## 7. Land
 

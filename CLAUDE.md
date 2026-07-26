@@ -13,6 +13,21 @@ trigger, not a suggestion:
 | …claim _why_ something is the way it is, or reverse a design           | **`DECISIONS.md`**                                                     |
 | …use a term you can't define (`catalog_key`, `dedup_key`, `make_norm`) | **`docs/glossary.md`**                                                 |
 | …touch a specific repo                                                 | that repo's own **`CLAUDE.md`** — truth for that repo, and its gotchas |
+| …claim code works, or that something is broken                         | run it: **`task doctor`** then **`task test`** (root `Taskfile.yml`)   |
+
+## Verify by running, not by reading
+
+Every product repo now has a `Taskfile.yml`. From the root: **`task test`** runs all twelve
+Python suites and prints one pass/fail table; **`task doctor`** checks the shared
+`repos/.venv` still resolves every `exonware` package. Inside a repo, `task test` and
+`task test -- tests/test_foo.py`.
+
+**A collection error is an environment fault, not a test failure** — and the two look
+identical in a bare pytest tail. When libraries move their source (xwapi, xwstorage, xwbase
+et al. moved `src/` → `ports/python/src/` on 2026-07-23) the editable installs keep pointing
+at the old directories, which still exist and import as empty namespace packages. Symptom:
+`ImportError: cannot import name X from exonware.Y (unknown location)` everywhere at once.
+`task doctor` names the stale packages. **Run it after every `/pull-repos`.**
 
 ## What this workspace is
 

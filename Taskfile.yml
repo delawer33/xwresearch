@@ -1,0 +1,106 @@
+# Taskfile.yml -- one command to answer "is the product stack broken?"
+#
+# repos/ holds ~50 independent git repos; there is no single `pytest` for the
+# workspace. These targets fan out over the product repos (kara / mawtarx /
+# markibx) using the single shared editable venv at repos/.venv.
+#
+# Start here after any pull:  task doctor && task test
+version: "3"
+
+vars:
+  VENV: "{{.TASKFILE_DIR}}/repos/.venv"
+  PY: "{{.TASKFILE_DIR}}/repos/.venv/bin/python"
+  KARA: kara kara-api kara-connect karaa-connect-api
+  MAWTARX: mawtarx mawtarx-api mawtarx-connect mawtarx-connect-api
+  MARKIBX: markibx markibx-api markibx-connect markibx-connect-api
+  WEB: kara-web mawtarx-web markibx-web
+
+tasks:
+  doctor:
+    desc: Verify repos/.venv still resolves every exonware package (run after every pull)
+    cmds:
+      - "{{.PY}} {{.TASKFILE_DIR}}/scripts/doctor.py"
+
+  test:
+    desc: Run every product repo's Python suite; report a pass/fail table
+    cmds:
+      - task: _fanout
+        vars: { REPOS: "{{.KARA}} {{.MAWTARX}} {{.MARKIBX}}" }
+
+  test:kara:
+    desc: Run the kara/karaa suites
+    cmds:
+      - task: _fanout
+        vars: { REPOS: "{{.KARA}}" }
+
+  test:mawtarx:
+    desc: Run the mawtarx suites
+    cmds:
+      - task: _fanout
+        vars: { REPOS: "{{.MAWTARX}}" }
+
+  test:markibx:
+    desc: Run the markibx suites
+    cmds:
+      - task: _fanout
+        vars: { REPOS: "{{.MARKIBX}}" }
+
+  # Collection errors are the failure mode that matters most here -- they mean the
+  # environment is broken, not the code, and they are indistinguishable from a
+  # normal failure in a bare pytest tail. Call them out separately.
+  _fanout:
+    internal: true
+    silent: true
+    cmds:
+      - |
+        fail=0
+        for r in {{.REPOS}}; do
+          d="{{.TASKFILE_DIR}}/repos/$r"
+          [ -d "$d" ] || { printf '  %-22s NOT CLONED\n' "$r"; continue; }
+          # -o addopts=-q pins verbosity: several repos already set addopts="-q" in
+          # pyproject, and a second -q makes pytest drop the summary line entirely.
+          out=$(cd "$d" && "{{.PY}}" -m pytest --no-header -o addopts=-q 2>&1) || true
+          if printf '%s' "$out" | grep -q 'error during collection'; then
+            printf '  %-22s CANNOT COLLECT -- run `task doctor`; if clean, the repo is behind a library rename\n' "$r"
+            fail=1
+          else
+            line=$(printf '%s' "$out" | grep -oE '[0-9]+ (passed|failed|error|skipped)[a-z]*' | tr '\n' ' ')
+            printf '  %-22s %s\n' "$r" "${line:-no tests}"
+            case "$line" in *failed*|*error*) fail=1 ;; esac
+          fi
+        done
+        exit $fail
+
+  web:typecheck:
+    desc: Typecheck/build the three Vite front-ends
+    silent: true
+    cmds:
+      - |
+        for r in {{.WEB}}; do
+          d="{{.TASKFILE_DIR}}/repos/$r"
+          [ -d "$d/node_modules" ] || { printf '  %-16s no node_modules -- npm install first\n' "$r"; continue; }
+          # kara-web is the only one with a `typecheck` script; the others get `build`.
+          s=typecheck; grep -q '"typecheck"' "$d/package.json" || s=build
+          (cd "$d" && npm run --silent "$s" >/dev/null 2>&1) \
+            && printf '  %-16s %s ok\n' "$r" "$s" \
+            || printf '  %-16s %s FAILED -- npm run %s\n' "$r" "$s" "$s"
+        done
+
+  stack:up:
+    desc: Start mawtarx-api + kara-api + kara-web locally (memory-capped)
+    cmds:
+      - "{{.TASKFILE_DIR}}/.claude/skills/run-local-stack/run-stack.sh start"
+
+  stack:status:
+    desc: Are the three local services up, and how much memory each?
+    cmds:
+      - "{{.TASKFILE_DIR}}/.claude/skills/run-local-stack/run-stack.sh status"
+
+  stack:down:
+    desc: Stop the local stack
+    cmds:
+      - "{{.TASKFILE_DIR}}/.claude/skills/run-local-stack/run-stack.sh stop"
+
+  default:
+    cmds:
+      - task --list
