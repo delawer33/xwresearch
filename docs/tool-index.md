@@ -3,8 +3,12 @@
 Task → platform lib → repo, so a new feature reaches for an existing tool instead of getting
 reinvented. **Status** tells you whether the tool is proven in this product or just available.
 
-> **Re-derived 2026-07-17** against synced HEADs of all 12 product repos: **9 directly imported,
-> 9 not.** "Not imported" ≠ unused — `xwaction` is everywhere via `xwapi`'s `XWActionRouter`.
+> **Re-derived 2026-07-26** against synced HEADs of all 12 product repos: **9 directly imported,
+> 12 not.** Imported, by file count: `xwapi` 188, `xwstorage` 26, `xwbase` 15, `xwauth` 13,
+> `xwschema` 11, `xwsystem` 10, `xwjson` 3, `xwentity`/`xwdata` 1 each. Still zero: `xwnode`,
+> `xwquery`, `xwsyntax`, `xwmodels`, `xwencrypt`, `xwbots`, `xwchat`, `xwgis`, `xwscript`,
+> `xwui`. "Not imported" ≠ unused — `xwaction` and `xwrouter` show 1 direct import each but are
+> everywhere via `xwapi`'s `XWActionRouter` and the engine switch.
 > Counts go stale; re-run `/pull-repos` before trusting them.
 
 | Need to... | Reach for | Status |
@@ -22,6 +26,8 @@ reinvented. **Status** tells you whether the tool is proven in this product or j
 | HTTP fetch with rate-limit/policy for a connector | `xwapi.scrapping` | **live** — mawtarx-connect, markibx-connect |
 | HTTP route | `xwapi` (`APIRouter`) | **live** — engine comes from xwbase's switch; prod resolved to `xwrouter` 2026-07-18, FastAPI is the fallback |
 | One decorator = HTTP endpoint + native WebSocket-RPC | `xwapi`'s `XWActionRouter` (built on `xwaction`) | **live and now the default** — kara-api, karaa-connect-api, mawtarx-api, mawtarx-connect-api, and markibx-api are all on it. markibx-connect-api is the one holdout (plain `APIRouter`, routes defined inline in `app.py`, no `routes/` package). Use `XWActionRouter` for new routes. |
+| Expose the same actions to an AI agent over MCP | `xwapi` (`server/engines/mcp.py`, `mcp_protocol.py`, `mcp_stdio.py`) | **built 2026-07-26** — an engine alongside `xwrouter`/FastAPI, so any `XWActionRouter` surface can publish over MCP without forking route logic (shared `action_schema.py` extracted from the xwrouter engine). **Zero references in any product repo**; its one consumer is `xwmemory`'s `server/app.py` (which calls `MCPServerEngine.register_action` directly — `XWAPI.create_app` only branches on fastapi/xwrouter and silently no-ops for `engine="mcp"`). Don't hand-roll an MCP server for a service that already has actions |
+| Persistent memory + relevance search for an LLM agent (entities, relations, episodes) | `xwmemory` | **new 2026-07-26, standalone** — replaces FalkorDB under Graphiti using xwstorage-db (BM25+vector) + xwnode (topology). Nothing in this workspace imports it, and its MCP tool surface is storage-only (placeholder `add_memory`, no entity extraction, BM25-only). Benchmarks are 250-node scale; read `repos/xwmemory/CLAUDE.md` before believing anything else about it |
 | Scoped auth on a route | `xwapi.fastapi_routes.require_scopes` | **live** |
 | Cached endpoint response | `xwapi.caching` (`XWApiCache`, `cached_endpoint`) | **live** — kara-api |
 | Federate login to an external IdP (Google, etc.) | `xwauth-connect` | **unwired** — nothing federates today |

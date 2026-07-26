@@ -51,17 +51,33 @@ karaa is in development right now.
 
 ## The platform layer (xw*)
 
-18 shared libraries under `repos/xw*`. Most have their own `CLAUDE.md` stating what it is, when
-to reach for it, its **verified** used-by list, and its gotchas — the exceptions today are
-`xwrouter` (the live HTTP engine), `xwgis`, `xwstorage-db-api`, and `xwui` (README only). Only a
-minority are actually imported by product code; the rest are available but unwired.
+28 repos under `repos/xw*` (25 Python, 3 JS/TS). Most have their own `CLAUDE.md` stating what it
+is, when to reach for it, its **verified** used-by list, and its gotchas — the exceptions today
+are `xwrouter` (the live HTTP engine), `xw3d`, `xwgis`, `xwstorage-db-api`, and `xwui` (README
+only). Only a minority are actually imported by product code; the rest are available but unwired.
 
 **How many are wired, and which, lives in one home: [`docs/tool-index.md`](docs/tool-index.md)** —
 task → library → status. Don't restate the count here; check that table before building any utility.
 
-**Two layouts.** Most libs are flat (`src/exonware/<pkg>/`). **xwschema, xwaction, xwquery,
-xwnode, xwmodels, xwentity, xwdata are polyglot** — Python at `ports/python/src/exonware/<pkg>/`,
-**no `src/`** (a `src/`-rooted grep finds nothing there). Import paths are normal either way.
+**Two layouts, and polyglot is now the majority** (re-derived 2026-07-26 — the old "most are
+flat" claim was stale). Import paths are normal either way; only the *file* paths differ.
+
+- **Polyglot (16)** — Python lives at `ports/python/src/exonware/<pkg>/`: `xwaction`, `xwapi`,
+  `xwauth`, `xwauth-identity`, `xwbase`, `xwbots`, `xwchat`, `xwdata`, `xwentity`, `xwmemory`,
+  `xwmodels`, `xwnode`, `xwquery`, `xwrouter`, `xwschema`, `xwstorage`.
+- **Flat (9)** — `src/exonware/<pkg>/`: `xwauth-connect`, `xwencrypt`, `xwjson`, `xwscript`,
+  `xwstorage-connect`, `xwstorage-db`, `xwstorage-db-api`, `xwsyntax`, `xwsystem`.
+- **No Python at all (3)** — `xw3d`, `xwgis`, `xwui` are JS/TS packages.
+
+Two traps in the grep, both real:
+
+- **A polyglot repo may still have a leftover `src/exonware/<pkg>/` directory that is empty** —
+  zero tracked files, sometimes just a `__pycache__` (seen in `xwapi`, `xwbase`, `xwstorage`,
+  `xwauth`, `xwauth-identity`). The path exists, so you think you're in the right place, and the
+  grep returns nothing. Absence of hits there is **not** absence of code.
+- **`xwsyntax` and `xwencrypt` have a `ports/python/src` but are flat.** Their real code is under
+  `src/` (what `pyproject.toml` packages); `ports/` holds only a small separate native-ABI
+  sidecar (`xwsyntax_native`, an `xwencrypt` ABI shim). Don't reclassify them as polyglot.
 
 Two naming traps that bite every time:
 
