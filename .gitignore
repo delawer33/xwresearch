@@ -2,3 +2,6 @@ repos/
 kara-data/
 mawtarx-data/
 xw3d/
+
+# Per-machine dev-server config: paths are local/session-scoped, not shareable.
+.claude/launch.json
