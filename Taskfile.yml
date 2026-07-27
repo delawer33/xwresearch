@@ -8,8 +8,11 @@
 version: "3"
 
 vars:
-  VENV: "{{.TASKFILE_DIR}}/repos/.venv"
-  PY: "{{.TASKFILE_DIR}}/repos/.venv/bin/python"
+  # Resolved, not hardcoded -- see scripts/find-python.sh for the precedence
+  # ($XW_PYTHON > active venv > repos/.venv > python3). repos/.venv is this
+  # workspace's convention, not something another machine or CI will have.
+  PY:
+    sh: "{{.TASKFILE_DIR}}/scripts/find-python.sh"
   KARA: kara kara-api kara-connect karaa-connect-api
   MAWTARX: mawtarx mawtarx-api mawtarx-connect mawtarx-connect-api
   MARKIBX: markibx markibx-api markibx-connect markibx-connect-api
@@ -17,8 +20,11 @@ vars:
 
 tasks:
   doctor:
-    desc: Verify repos/.venv still resolves every exonware package (run after every pull)
+    desc: Verify the venv still resolves every exonware package (run after every pull)
     cmds:
+      # --check first: "wrong interpreter" and "stale editable install" are
+      # different faults with near-identical symptoms. Name which one it is.
+      - "{{.TASKFILE_DIR}}/scripts/find-python.sh --check >/dev/null"
       - "{{.PY}} {{.TASKFILE_DIR}}/scripts/doctor.py"
 
   test:
@@ -85,6 +91,21 @@ tasks:
             && printf '  %-16s %s ok\n' "$r" "$s" \
             || printf '  %-16s %s FAILED -- npm run %s\n' "$r" "$s" "$s"
         done
+
+  venv:
+    desc: Build or repair the shared editable venv (run after a library moves its source)
+    cmds:
+      - "{{.PY}} {{.TASKFILE_DIR}}/scripts/setup-venv.py {{.CLI_ARGS}}"
+
+  ci:gen:
+    desc: Regenerate .github/workflows/ci.yml in every Python product repo
+    cmds:
+      - "{{.PY}} {{.TASKFILE_DIR}}/scripts/gen-ci-workflows.py {{.CLI_ARGS}}"
+
+  ci:local:
+    desc: Run the CI bootstrap for one repo in a scratch dir (task ci:local -- markibx)
+    cmds:
+      - "{{.TASKFILE_DIR}}/scripts/ci-bootstrap.sh {{.CLI_ARGS}}"
 
   stack:up:
     desc: Start mawtarx-api + kara-api + kara-web locally (memory-capped)

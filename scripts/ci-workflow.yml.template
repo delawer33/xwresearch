@@ -1,0 +1,65 @@
+# {{REPO}} — CI
+#
+# Generated from xwresearch/scripts/ci-workflow.yml.template by
+# scripts/gen-ci-workflows.py. Edit the template, regenerate; do not hand-edit
+# the copies in each repo.
+#
+# Why this is not the usual "pip install -e . && pytest": every product repo
+# depends on ~9 `exonware-*` distributions and NONE of them are published to
+# PyPI (all 404). A single-repo job cannot install its own dependencies. So the
+# job clones the platform libraries and builds one shared editable venv over
+# them — that is what scripts/ci-bootstrap.sh does, and it is runnable locally,
+# which is the only reason to trust it.
+#
+# REQUIRED SETUP (the job cannot work without both):
+#   secrets.XW_CI_TOKEN  — PAT / App token with read access to the Exonware org.
+#                          Every sibling repo is private.
+#   vars.XW_TOOLS_REPO   — owner/name of the repo holding scripts/ (currently
+#                          {{TOOLS_REPO}}). Not in the Exonware org, so it must
+#                          be named explicitly.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # A second push supersedes the first: the bootstrap clones ~28 repos and there
+  # is no point paying for a run whose result is already stale.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out {{REPO}}
+        uses: actions/checkout@v4
+        with:
+          path: repo
+
+      - name: Check out workspace tooling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.XW_TOOLS_REPO }}
+          token: ${{ secrets.XW_CI_TOKEN }}
+          path: tooling
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Bootstrap workspace and run the suite
+        env:
+          GH_TOKEN: ${{ secrets.XW_CI_TOKEN }}
+        run: |
+          # ci-bootstrap.sh clones the siblings itself; it reuses the checkout
+          # above rather than re-cloning this repo.
+          mkdir -p ws/repos
+          mv repo ws/repos/{{REPO}}
+          tooling/scripts/ci-bootstrap.sh {{REPO}} "$PWD/ws"

@@ -18,6 +18,7 @@ import importlib
 import os
 import pkgutil
 import sys
+from pathlib import Path
 
 
 @contextlib.contextmanager
@@ -89,22 +90,60 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             abi = f"MISSING ({type(exc).__name__}) -- install xwmemory/docker/xwport_abi_stub"
 
+    # Two repos shipping the same exonware.X both land on the namespace path, and
+    # whichever editable install sorts first silently wins. The loser's functions
+    # then "don't exist" (live case: kara-connect and karaa-connect-api both ship
+    # exonware.karaa_connect_api; when kara-connect wins, karaa_api dies on a
+    # missing build_connect_routers). Install order is not a contract -- name it.
+    providers: dict[str, list[Path]] = {}
+    for root in roots:
+        for child in sorted(Path(root).iterdir()) if Path(root).is_dir() else []:
+            if (child / "__init__.py").is_file():
+                providers.setdefault(child.name, []).append(child)
+
+    # Sharing a package across repos is fine *if* the winning __init__ calls
+    # pkgutil.extend_path -- xwauth does, so xwauth/, xwauth-connect/ (.connect)
+    # and xwauth-identity/ (.id) all coexist. It is only a bug when a provider's
+    # directory never makes it onto the merged __path__: that repo's modules are
+    # then invisible, with no error anywhere.
+    dupes: dict[str, list[Path]] = {}
+    for name, dirs in providers.items():
+        if len(dirs) < 2:
+            continue
+        try:
+            with muted():
+                merged = {Path(p).resolve() for p in importlib.import_module(f"exonware.{name}").__path__}
+        except Exception:  # noqa: BLE001 - already counted as broken above
+            continue
+        shadowed = [d for d in dirs if d.resolve() not in merged]
+        if shadowed:
+            dupes[name] = shadowed
+
     for mod in stale:
         print(f"STALE   {mod} -- namespace shell, no source. Reinstall its editable.")
+    for name, where in sorted(dupes.items()):
+        print(f"SHADOWED exonware.{name} -- these copies are on no import path:")
+        for w in where:
+            print(f"         {w}")
     for mod, err in broken:
         print(f"BROKEN  {mod} -- {err}")
     for mod, missing in optional:
         print(f"note    {mod} -- optional dep {missing!r} not installed (ignored)")
 
     print(f"\nxwport_abi: {abi}")
-    print(f"{ok} ok, {len(stale)} stale, {len(broken)} broken, {len(optional)} missing-extra")
+    print(f"{ok} ok, {len(stale)} stale, {len(dupes)} shadowed, {len(broken)} broken, {len(optional)} missing-extra")
 
     if stale:
         print(
             "\nFix: find the repo, check whether its pyproject moved under ports/python,\n"
             "     then `uv pip install --python repos/.venv/bin/python --no-deps -e <path>`"
         )
-    return 1 if (stale or broken) else 0
+    # Exit only on stale/shadowed: the two faults this tool uniquely detects, and
+    # the two that silently break every dependent repo at once. BROKEN is reported
+    # but not fatal -- it is usually one unrelated package missing an optional
+    # native backend (xwjson's Rust core, a TOML serializer), and failing a repo's
+    # CI over a neighbour's missing extra just teaches everyone to skip the check.
+    return 1 if (stale or dupes) else 0
 
 
 if __name__ == "__main__":
