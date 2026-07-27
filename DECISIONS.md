@@ -54,10 +54,15 @@ data-as-code is that a data mistake degrades a feature, it doesn't take down two
 (build fails before ship; routes report unavailable) without coupling a data typo to a two-product
 outage. **Relates to:** D-f (seed rebuilt every boot), D-010 (2a seed is the gate).
 
-**Code (to build):** `repos/markibx-api/.../state.py` (try/except around `build_seed_registry`),
-the spine routes in `routes/catalog.py` (503 when `spine is None`), and
-`scripts/vps-markibx-mawtarx-deploy/pack-bundle.sh` (validation step). Loader raises `SeedError`
-today (`repos/markibx/.../spine_seed_loader.py`).
+**Code — BUILT** (merged to `main` 2026-07-27, markibx-api `57a823a`): `state.py` wraps
+`build_seed_registry`; the spine routes 503 via `require_spine_or_503`; `pack-bundle.sh` gates the
+build on `markibx --validate-seed` *before* any tarball is staged. A fourth call site was found
+and fixed later (`6df33b7`): `_prefill_spine` let `require_spine()`'s `RuntimeError` escape as a
+bare **500**, so a connector pull failed outright instead of degrading — it now returns
+`{skipped: "spine unavailable"}` and still persists its catalog rows. Lesson worth keeping: a
+fail-soft decision has to be enforced at **every** reader of the nullable field, not just the
+obvious ones. Tests corrupt a real copy of the committed seed and run the real loader rather than
+mocking `SeedError`.
 
 ---
 
@@ -82,9 +87,15 @@ effect of this change.
 future canonical one but is not yet authoritative. A future agent seeing both should not "clean up"
 by deleting either until the deliberate retirement. **Relates to:** D-010 (2a gate / 2b depth).
 
-**Code:** web — new view over `/api/markibx/v1/catalog/{resolve,browse/*}` in `repos/markibx-web`
-(`src/pages/user/catalog.ts` is the *legacy* surface; the spine view is new, not a rewrite of it).
-API routes exist: `repos/markibx-api/.../routes/catalog.py` (`resolve_spine`, browse accessors).
+**Code — BUILT** (#30/#32), merged to markibx-web `main` **locally only — the account has no push
+access to `Exonware/markibx-web` (403)**. The spine view is `src/views/spine-catalog.ts`, registered
+as `{id: "console.spine", zone: "console", guard: "auth"}` in
+`src/pages/shared/loaders/route-registry.ts`; the typed client is `src/app/spine.ts`. Both surfaces
+coexist as decided — the legacy `src/views/catalog.ts` is untouched.
+
+⚠️ **Path note:** origin/main refactored `src/pages/` → `src/views/` with a shared route registry
+and deleted `src/pages/router.ts`, so this entry's original paths are stale. Ignore any doc that
+still says `src/pages/user/catalog.ts`.
 
 ---
 
@@ -116,9 +127,17 @@ demo — the spine, resolve/browse, provenance, and prefill are the real planned
 human depth-fill is deferred off the gate. **Does not** change D-g's definition of N or D-e's
 source lanes; it sequences them. **Relates to:** D-e (source lanes), D-g (N by coverage), #26, #27.
 
-**Code:** prefill built — core `spine_prefill.py`, api `routes/catalog.py::_prefill_spine` (branches
-`feat/slice5-connector-prefill{,-api}`, unmerged). Identity seed: `scripts/rank_gcc_models.py`
-(needs prod snapshot) → `repos/markibx/src/exonware/markibx/data/spine_seed/`.
+**Code — BUILT and merged to `main` 2026-07-27.** Prefill: core `spine_prefill.py`, api
+`routes/catalog.py::_prefill_spine`. 2a: `scripts/rank_gcc_models.py` +
+`scripts/seed_gcc_identity.py` → 222 rows in `repos/markibx/.../data/spine_seed/`.
+
+**Correction to this entry's premise:** 2a was recorded as needing a **prod** snapshot, and #33
+was left un-startable for that reason. It didn't — `repos/mawtarx-connect/mawtarx-data/xwdb-saudi-v2`
+already held 8,315 genuinely scraped SA listings. The blocker was never real; nobody had looked
+past the two obvious small stores. The generalizable lesson: **before calling work blocked on data
+you can't reach, enumerate every store on disk** — `find . -name "*.xwjson" -size +50k` would have
+answered it in one command. Note the console is live on 2a + prefill exactly as this decision
+predicted, so the sequencing call itself held.
 
 ---
 
