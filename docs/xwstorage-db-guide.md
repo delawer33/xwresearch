@@ -75,6 +75,13 @@ the loop in `bulk_write()`.
 
 ## Traps
 
+- **`XWDatabaseConfig(root_path=...)` must be a `Path`, not a `str`.** A string gets as far as the
+  engine and then dies on `root / "catalog.xwjson"` with
+  `TypeError: unsupported operand type(s) for /: 'str' and 'str'` — deep in `engine.py`, naming
+  neither your argument nor the config, so it reads like an engine bug. `Path(p).resolve()` at the
+  call site. Opening an existing store read-only is otherwise just:
+  `await XWDatabase.open(XWDatabaseConfig(name="probe", root_path=Path(p).resolve()))`
+  then `list(db.find("<collection>"))` — handy for measuring against a real store.
 - **The engine write path takes no cross-process lock.** Its only synchronization is a
   `threading.RLock` inside one engine instance. Two processes opening the same DB root will still
   silently corrupt each other. **One writer process per database, always** — if a background job

@@ -4,7 +4,11 @@ Cross-repo note on `repos/markibx/src/exonware/markibx/normalize.py` (make/model
 normalization, S1) and `normalize_data.py` (its dictionary). See
 `repos/markibx/CLAUDE.md` and `repos/mawtarx/CLAUDE.md` for the repos this spans.
 
-## The gap: per-make trim rules don't scale
+Two independent gaps live here: model-side **fragmentation** (one real model → many slugs) and
+make-side **collision** (two real makes → one slug). Fragmentation starves pricing comps;
+collision merges unrelated cars under a confident-looking `resolved=True`.
+
+## Gap 1: per-make trim rules don't scale
 
 `canonical_model()` collapses grade/trim suffixes ("Bentayga **Speed**", "C63
 **AMG**") into a base model slug via `MODEL_TRIM_RULES` — a hand-written regex
@@ -66,6 +70,47 @@ this up, not resolved here):
   splitter needs to run through the same D2c re-link path as any other
   normalize.py change (`store.renormalize()` isn't enough on its own, per the
   backfill-mechanics note below).
+
+## Gap 2: fuzzy make-matching silently aliases an UNKNOWN make onto a known one
+
+Measured 2026-07-27 against the same store. `canonical_make("FAW")` returns
+`MakeResult(slug="baw", resolved=True, score=0.9)` — FAW is **absent** from
+`MAKE_CANONICAL_SLUGS`/`MAKE_ALIASES`, BAW is present, and Levenshtein("faw","baw") == 1, so
+`FUZZY_AUTO_APPLY_DISTANCE = 1` auto-applies it. Result in live data: 60 rows under
+`make_norm="baw"`, of which **55 are FAW Bestune** and only 5 genuine BAW. Two different Chinese
+manufacturers merged, and `resolved=True` means nothing downstream flags it.
+
+**Why this is a class of bug, not one entry to add:** distance-1 auto-apply is scale-free but
+make slugs are not. For a 3-character make one edit is a third of the string, and 18 canonical
+slugs are ≤ 4 chars (`baw bmw byd gac gmc gwm jac kia mg ram rox seat audi fiat ford jeep mini
+opel`). **Any short make missing from the dictionary can be captured by a near neighbour at
+`score` 0.9** — and the score is *derived from edit distance* (`1.0 - d/10`), so it reads as high
+confidence precisely when it's least trustworthy. The fix is not "add FAW": it's to make the
+auto-apply threshold **length-aware** (require a relative distance, not an absolute one) or refuse
+auto-apply below some slug length, and add FAW as a canonical make. Everything needed to see this
+is already logged — `make_normalize.fuzzy_candidate … auto_applied=True` fires on every hit, so
+the log has been recording this the whole time.
+
+Two related things the same measurement showed, both *not* mis-resolutions — these fall through
+to `resolved=False` and pass through as-is, which is the honest behaviour:
+
+- **Arabic-script names don't transliterate.** `canonical_make("تويوتا")` → slug `تويوتا`,
+  unresolved. So `تويوتا/كورولا` ranks as a separate make·model from `toyota/corolla`. Latin-side
+  variants split the same way (`mg:5` vs `mg:mg5`, `bmw:5series` vs `bmw:520i`), and mixed-script
+  input mangles (`patrolربع`, `hs5deluxeتوwd`).
+- **Test/junk makes pass through** (`zzperf`, `zzsold`, `zzr2`, `zzs4`, `zztest`) — 310+ rows in
+  the store. Consumers must exclude `zz*` themselves; nothing upstream does.
+
+⚠️ **Where the fix goes:** `repos/markibx`'s `normalize.py` + `normalize_data.py` (this doc's
+subject), NOT `mawtarx-connect`. The connectors don't normalize; mawtarx's
+`store.py::_recompute_norm()` calls markibx on `upsert()` (see below). Easy to get wrong — a
+scraped-data bug intuitively feels like a scraper bug.
+
+**Blast radius if you change `canonical_make`:** markibx's own catalog **spine seed** ids are
+derived from `make_norm` (`repos/markibx/.../data/spine_seed/`, 45 makes / 222 models, ranked from
+this very store). Re-resolving FAW off `baw` changes seed ids and what incoming listings link to,
+so it must go through the D2c re-link path *and* a seed re-run together — see that seed's
+`README.md`, which documents the `baw`=FAW case for exactly this reason.
 
 ## Applying a `MODEL_TRIM_RULES` change to already-stored data
 

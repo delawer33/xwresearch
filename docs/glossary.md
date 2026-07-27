@@ -39,6 +39,9 @@ Terms agents keep re-deriving. Each fact has one home; this is the shortlist.
 - **make_norm / model_norm** — the pricing-engine **matching** key (normalized, noisy:
   Arabic-script dupes, description-slug junk, one-offs). **Not** a display vocabulary —
   never build a dropdown from `SELECT DISTINCT make_norm`. See `mawtarx-api/AUTOCOMPLETE.md`.
+  Noisy is the documented half; it can also be **silently wrong** — an unknown short make gets
+  fuzzy-aliased onto a known one at high confidence (FAW → `baw`). Computed in *markibx*, not the
+  scrapers: [`normalize-known-gaps.md`](normalize-known-gaps.md).
 
 - **display vs slug** (autocomplete) — `slug` is the stable key (`versa`); `display` is the
   regional label (`Sunny`). Frontend sends the slug, shows the display.
