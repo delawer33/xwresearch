@@ -1,5 +1,11 @@
 # CLAUDE.md
 
+## STOP — writing code? read first
+
+"implement" / "write code" / "add this" / "fix this" / "quick change" → before your first
+`Edit`/`Write`: **`AGENTS.md`, `ARCHITECTURE.md`, target repo's `CLAUDE.md`.** Urgency is not
+an exemption. Then open with one line: what you read, what it changed. No line = you skipped it.
+
 ## Read before you act
 
 Calibration, not the map. This is the only doc loaded automatically — the table is a hard
@@ -27,7 +33,12 @@ identical in a bare pytest tail. When libraries move their source (xwapi, xwstor
 et al. moved `src/` → `ports/python/src/` on 2026-07-23) the editable installs keep pointing
 at the old directories, which still exist and import as empty namespace packages. Symptom:
 `ImportError: cannot import name X from exonware.Y (unknown location)` everywhere at once.
-`task doctor` names the stale packages. **Run it after every `/pull-repos`.**
+`task doctor` names the stale packages; **`task venv` repairs them.** Run doctor after every
+`/pull-repos`.
+
+`task ci:local -- <repo>` reproduces the whole CI job in ~60s. Before writing any env, venv, or
+CI helper, read **`docs/tool-index.md`'s "Workspace tooling"** — it also records why a plain
+`pip install -e .` can never work here.
 
 ## What this workspace is
 

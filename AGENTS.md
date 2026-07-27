@@ -120,6 +120,11 @@ adding any third-party dependency.
 Tests passing is not verification that a change works; exercise the actual flow. The `/verify`
 skill does this, `/run-local-stack` brings up mawtarx-api + kara-api + kara-web wired together.
 
+`task test` runs every product suite (~4 min), `task test -- tests/test_foo.py` inside a repo.
+**A collection error is the environment, not your change** — `task doctor`, then `task venv`.
+Push-worthy work should also survive `task ci:local -- <repo>`, which rebuilds the workspace
+from clean clones in ~60s and so catches what only your local venv was making pass.
+
 **Performance claims need numbers and a scope.** The WS-RPC benchmark is the cautionary tale:
 "6–23× faster" was true for trivial payloads and *false* for 5 KB payloads and the real
 `/catalog/vehicles`, where plain HTTP keep-alive still won. Never report a speedup without the

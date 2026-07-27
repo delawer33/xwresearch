@@ -43,6 +43,32 @@ reinvented. **Status** tells you whether the tool is proven in this product or j
 | Entity-native language transpiling to Rust/C++/TS/Python/Go/WASM | `xwscript` | **unwired** — heavyweight, not a typical-feature tool |
 | Chat/bot integration (Telegram/Discord/Slack) | `xwbots`, `xwchat` | **unwired** — no chat feature in karaa today |
 
+## Workspace tooling (`scripts/`, all wired to `task`)
+
+Not libraries — the scripts that make the repos runnable. Written 2026-07-27; check here before
+writing another venv/CI helper.
+
+| Need to... | Run | Notes |
+|---|---|---|
+| Know if the environment is sane | `task doctor` | Only tool that catches **stale editable paths** (a lib moved `src/` → `ports/python/src/`; the old dir imports as an empty namespace package) and **shadowed packages**. Exits non-zero on those two only |
+| Build/repair the shared venv | `task venv` (`-- --dry-run`) | Two-phase by necessity — see below |
+| Find the right interpreter | `scripts/find-python.sh [--check]` | `$XW_PYTHON` > active venv > `repos/.venv` > `python3`. Every repo `Taskfile` uses it; never hardcode `repos/.venv` |
+| Reproduce CI locally (~60s) | `task ci:local -- <repo>` | Clones 28 siblings into a scratch dir, builds the venv, runs doctor + pytest |
+| Regenerate the CI workflows | `task ci:gen` | One template → 12 repos. Edit `scripts/ci-workflow.yml.template`, never the copies |
+
+Three facts these encode, each of which cost an afternoon to find:
+
+- **`uv pip install -e` over the whole workspace cannot resolve.** Four packages carry
+  contradicting exact pins (`exonware-xwsystem` is pinned `==0.9.0.39`, `==0.9.0.43` **and**
+  `==0.9.0.79`). So `task venv` installs editables `--no-deps` first, third-party after — for a
+  local checkout the working tree *is* the version. `task venv -- --show-pinners` names who wants
+  what. Release builds still have to reconcile them.
+- **Nothing `exonware-*` is on PyPI** (all 404). A CI job that checks out one repo and installs
+  its own dependencies can never work; it has to clone the siblings first.
+- **`xwaction` imports `xwport_abi` unconditionally** and no such distribution exists anywhere.
+  `repos/.venv` carries the stub from `xwmemory/docker/xwport_abi_stub`; without it every
+  importer of `xwaction` dies at collection.
+
 ## Rule of thumb
 
 Before writing a new utility, grep this table, then check the target repo's own `CLAUDE.md`
