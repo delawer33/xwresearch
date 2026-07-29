@@ -132,11 +132,19 @@ least `/opt/mawtarx-api/.venv`, so **try a direct `pip install`/`ls` as `shukri`
 before assuming you need root** — several `/opt/*/.venv` dirs are already writable this way;
 an unverified one just gives `Permission denied`, which costs nothing to check.
 
-**Real gap:** no read or safe-incremental-write path exists for an *existing* service's env
-file (e.g. `/etc/mawtarx-api.env`, `600 root:root`). `install-env` only replaces a file
-wholesale and is scoped to new services; none of the three wrappers can `cat` one. Changing a
-var on a live service's env file needs a human with real root — don't blind-overwrite one with
-`install-env` guessing at its current contents.
+**Real gaps** (the standing scoped-grant request lives in
+[`../.claude/skills/deploy-vps/access-gaps.md`](../.claude/skills/deploy-vps/access-gaps.md);
+run `~shukri/xw-access-preflight` on the box for the live GRANTED/BLOCKED picture):
+
+- **No read or safe-incremental-write path for an *existing* service's env file** (e.g.
+  `/etc/mawtarx-api.env`). `install-env` only *replaces* a file wholesale and is scoped to new
+  services; no wrapper can `cat` one, and `/proc/<pid>/environ` is unreadable to `shukri`.
+  Changing one var needs a human with real root — don't blind-overwrite guessing at contents.
+  (This is what blocked enabling `MAWTARX_RECONCILE_ENABLED` on 2026-07-29.)
+- **No `mask`/`unmask`.** `xw-backend-ctl` allows start/stop/restart/… but not `mask`, and the
+  `xw-service-watchdog@<svc>.timer` (below) is outside its unit allowlist — so you cannot keep a
+  unit down. Any offline op (e.g. a store backfill) must finish inside the ~2-min watchdog
+  window; align to just after a tick.
 
 ## Data layer — flat-file xwjson
 
@@ -181,7 +189,12 @@ not to the federated total the homepage serves.
 ## Reliability & security bits
 
 - **Watchdog:** `xw-service-watchdog@<svc>.timer` fires ~every 2 min for each of the
-  five APIs — a lightweight liveness check that restarts a dead unit.
+  five APIs — a liveness check that restarts any *inactive* unit (`is-active` fails → it
+  runs `systemctl restart`). You can't stop it (no `mask`, see gaps above), so it also
+  restarts a unit *you* stopped for an offline op — hence the 2-min-window rule.
+- **Concurrent-agent deploys:** this box is shared by multiple agent sessions; one silently
+  reverted a fresh deploy on 2026-07-29. An advisory single-writer lock (`~shukri/xw-deploy-lock`)
+  now guards deploys — acquire it first per the `deploy-vps` skill's step 0.
 - **CrowdSec** runs (`:6060`, `:8080` loopback) for intrusion detection; an
   `exonware-security` cron job is present.
 - Postfix listens on loopback `:25` (local mail only).

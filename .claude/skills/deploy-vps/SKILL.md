@@ -99,33 +99,24 @@ sudo call — it's a DNS quirk, not a failure; the command still runs.
 
 ### 0. Acquire the single-writer deploy lock — BEFORE anything else
 
-This box is shared by multiple agent sessions. On 2026-07-29 a concurrent session
-reinstalled an old `mawtarx` build over a freshly-deployed one and a later restart
-silently regressed prod (same class as the 2026-07-15 karaa-api stale-deploy
-incident). **Hold the lock for the whole deploy — install through verify — so no
-other session installs/restarts underneath you.**
+Box is shared by multiple agent sessions; one silently reverted another's live deploy
+(see `vps-current-state.md`). **Hold the lock install-through-verify** so no other
+session installs/restarts underneath you.
 
 ```bash
 KEY=~/.ssh/exonware_riyadh_shukri_rsa
-# ID yourself uniquely (session/agent id). Reason is free text.
-ssh -i $KEY shukri@149.104.105.145 '/home/shukri/xw-deploy-lock acquire <your-session-id> "deploy <repo>"'
-# exit 0 = you hold it. exit 1 = DENIED (someone else is mid-deploy) — STOP,
-# run `... xw-deploy-lock status` to see who, and wait or coordinate. Do NOT
-# `break` a live lock; it auto-expires after 30 min if that session died.
+ssh -i $KEY shukri@149.104.105.145 '/home/shukri/xw-deploy-lock acquire <session-id> "deploy <repo>"'
+# 0=held. 1=DENIED (someone's mid-deploy) → STOP; `xw-deploy-lock status` shows who.
+# Don't `break` a live lock — it auto-expires after 30 min if that session died.
 ```
 
-If a task's *last* step touches config beyond a venv install/restart (e.g. an env
-var, a `mask`), run `/home/shukri/xw-access-preflight` first — it reports up front
-which capabilities are GRANTED vs BLOCKED, so you scope the work correctly (or
-hand the blocked step to a human) instead of dying at the wall. Known gaps and the
-grants to request are in [`access-gaps.md`](access-gaps.md).
+Advisory (root-owned `xw-backend-ctl` can't enforce it) — works only if every agent does
+this step. Release in Cleanup. Missing on the box? `scp xw-deploy-lock.sh` up + `chmod +x`.
 
-Release it in the Cleanup step. The lock lives at `~shukri/.xw-deploy.lock.d`
-(atomic `mkdir`, holder+reason+timestamp, 30-min stale-TTL). It is **advisory** —
-the root-owned `xw-backend-ctl` can't be made to require it — so it only works if
-every deploy agent follows this step. The script ships in this skill dir
-(`xw-deploy-lock.sh`); if `/home/shukri/xw-deploy-lock` is missing, `scp` it up
-and `chmod +x` it first.
+If the task's *last* step needs config beyond a venv install/restart (an env var, a
+`mask`), run `~shukri/xw-access-preflight` first — GRANTED/BLOCKED up front so you scope it
+right (or hand the blocked step to a human) instead of dying at the wall; gaps + grant
+requests in [`access-gaps.md`](access-gaps.md).
 
 ### 0b. Know what you're about to ship
 
