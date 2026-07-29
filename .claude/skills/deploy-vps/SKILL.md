@@ -114,6 +114,12 @@ ssh -i $KEY shukri@149.104.105.145 '/home/shukri/xw-deploy-lock acquire <your-se
 # `break` a live lock; it auto-expires after 30 min if that session died.
 ```
 
+If a task's *last* step touches config beyond a venv install/restart (e.g. an env
+var, a `mask`), run `/home/shukri/xw-access-preflight` first — it reports up front
+which capabilities are GRANTED vs BLOCKED, so you scope the work correctly (or
+hand the blocked step to a human) instead of dying at the wall. Known gaps and the
+grants to request are in [`access-gaps.md`](access-gaps.md).
+
 Release it in the Cleanup step. The lock lives at `~shukri/.xw-deploy.lock.d`
 (atomic `mkdir`, holder+reason+timestamp, 30-min stale-TTL). It is **advisory** —
 the root-owned `xw-backend-ctl` can't be made to require it — so it only works if
