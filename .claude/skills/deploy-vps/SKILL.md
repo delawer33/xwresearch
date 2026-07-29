@@ -97,7 +97,31 @@ sudo call — it's a DNS quirk, not a failure; the command still runs.
 
 ## Deploy procedure (do this for every repo you touch)
 
-### 0. Know what you're about to ship
+### 0. Acquire the single-writer deploy lock — BEFORE anything else
+
+This box is shared by multiple agent sessions. On 2026-07-29 a concurrent session
+reinstalled an old `mawtarx` build over a freshly-deployed one and a later restart
+silently regressed prod (same class as the 2026-07-15 karaa-api stale-deploy
+incident). **Hold the lock for the whole deploy — install through verify — so no
+other session installs/restarts underneath you.**
+
+```bash
+KEY=~/.ssh/exonware_riyadh_shukri_rsa
+# ID yourself uniquely (session/agent id). Reason is free text.
+ssh -i $KEY shukri@149.104.105.145 '/home/shukri/xw-deploy-lock acquire <your-session-id> "deploy <repo>"'
+# exit 0 = you hold it. exit 1 = DENIED (someone else is mid-deploy) — STOP,
+# run `... xw-deploy-lock status` to see who, and wait or coordinate. Do NOT
+# `break` a live lock; it auto-expires after 30 min if that session died.
+```
+
+Release it in the Cleanup step. The lock lives at `~shukri/.xw-deploy.lock.d`
+(atomic `mkdir`, holder+reason+timestamp, 30-min stale-TTL). It is **advisory** —
+the root-owned `xw-backend-ctl` can't be made to require it — so it only works if
+every deploy agent follows this step. The script ships in this skill dir
+(`xw-deploy-lock.sh`); if `/home/shukri/xw-deploy-lock` is missing, `scp` it up
+and `chmod +x` it first.
+
+### 0b. Know what you're about to ship
 
 ```bash
 cd repos/<repo>
@@ -137,6 +161,39 @@ unzip -l /tmp/wheel-out/*.whl | grep -i <expected-file>
 rm -rf /tmp/wheel-check /tmp/wheel-out
 ```
 
+### 1b. Pre-flight — probe the TARGET venv (read-only), before any write
+
+The local build-test proves the wheel *builds*; it does NOT prove the code *imports against what
+the prod venv actually carries*. Do a read-only import probe against **every** venv you'll install
+into, while nothing has been overwritten and a failure costs zero:
+
+```bash
+ssh -i ~/.ssh/exonware_riyadh_shukri_rsa shukri@149.104.105.145 '
+XWJSON_ABI_LIB=/opt/kara-api/libxwjson_abi.so XWBASE_ALLOW_GIL=1 \
+  /opt/<target-venv>/.venv/bin/python -c "from exonware.<pkg_api>.app import create_app; create_app(); print(\"probe OK\")"
+'
+```
+
+(`XWBASE_ALLOW_GIL=1` replicates what the systemd units set — without it xwbase refuses to build
+the app on a GIL Python and you get a false failure.)
+
+- **A drifted `main` = a coordinated multi-package release, not a one-package deploy.** If the repo
+  renamed/split a module or gained a dep since the last deploy, the target venv is probably missing
+  or holds a *stale build* of a shared lib — and **the version string won't reveal it** (same
+  `0.0.1.x`, older bytes — the `pip show` version does not bump on every change). Probe surfaces
+  it as an `ImportError` in one call; guessing surfaces it as a live half-deployed venv.
+- **Probe every service sharing the target venv, not just the one you're shipping.** markibx-api
+  and markibx-connect-api share `/opt/markibx-api/.venv` — a lib you bump for one must import for
+  both before you restart either.
+- If a shared lib is stale, stage *it* too (proper: `pip install` the built wheel; last resort:
+  align from a sibling venv that already runs this era of code) and re-probe until every app on the
+  venv imports — THEN proceed.
+
+Cost of skipping this (2026-07-28): a markibx-api deploy that built fine locally turned into a
+live multi-package rabbit hole — `main` needed a newer `xwbase`/`xwbase-media` than
+`/opt/markibx-api/.venv` held, discovered only *after* force-reinstalling, with the running
+service one watchdog-restart away from crashing markibx.com.
+
 ### 2. Tar the whole repo, not just `src/`
 
 Tar `pyproject.toml`, `README.md`, and `src/` together so `pip install
@@ -165,8 +222,17 @@ Two consequences:
   another — that window is a live crash.
 - **Do not rely on a service staying stopped.** Any "stop it, do X offline,
   start it" procedure (e.g. an offline data migration) can end up with the
-  service running concurrently against the same files. If you truly need it
-  down, `sudo systemctl mask` it first and unmask after.
+  service running concurrently against the same files. The watchdog
+  (`xw-service-watchdog@<svc>.timer`) fires **every 2 minutes** and restarts any
+  inactive unit. **You cannot `mask` around it**: `xw-backend-ctl` allows
+  start/stop/restart/… but NOT `mask`, and the watchdog timer's own name
+  (`xw-service-watchdog@…`) is outside the wrapper's unit allowlist, so you can't
+  stop it either (verified 2026-07-29). So an offline op MUST fit inside one
+  2-minute window: align to just after a watchdog tick (they fire at even-minute
+  `:09`) and finish well under 120 s — e.g. the mawtarx renormalize backfill
+  opens the store in `batch` durability so it's one ~20 s write, not per-row.
+  This watchdog is a *systemd* restarter and is SEPARATE from the step-0 deploy
+  lock, which guards against *other agent sessions*; you need both.
 
 ### 3. Extract into a fresh dir on the server, install, but don't restart yet
 
@@ -316,9 +382,15 @@ Wrap it in a small oneshot `.service` (`User=<name>`, `ExecStart=<cmd>`), `insta
 
 ## Cleanup
 
+**Release the deploy lock (step 0) — only after the deploy is fully verified:**
+
 ```bash
+ssh -i $KEY shukri@149.104.105.145 '/home/shukri/xw-deploy-lock release <your-session-id>'
 rm -f /tmp/<repo>-src.tar.gz   # local scratch tarball
 ```
+
+Release only when you're done touching the box; holding it through verification is
+the point. If you abandon a deploy, release anyway (or let the 30-min TTL do it).
 
 (Leave the `/tmp/<repo>-deploy` staging dir on the server — harmless, and
 useful for the next person diagnosing what actually got shipped.)
