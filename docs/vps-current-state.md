@@ -77,12 +77,14 @@ TLS-terminated public domains, from `/etc/caddy/Caddyfile`:
 | `karaa.net`, `www.karaa.net` | SPA `/var/www/kara-web` | `/api/*`,`/docs*`,`/openapi.json` → karaa-api :8132 | **yes** (gate, `site=kara`) |
 | `:8137` (IP preview) | same `kara_site` snippet | → karaa-api :8132 | **yes** (gate) |
 | `mawtarx.com`, `www.mawtarx.com` | SPA `/var/www/mawtarx-web` | `/api/mawtarx/*` → :8252, `/api/mawtarx-connect/*` → :8253 | **yes** (gate, `site=mawtarx`) |
-| `markibx.com`, `www.markibx.com` | SPA `/var/www/markibx-web` | `/api/markibx/*` → :8242, `/api/markibx-connect/*` → :8244 | **no** (public) |
+| `markibx.com`, `www.markibx.com` | SPA `/var/www/markibx-web` | `/api/markibx/*` → :8242, `/api/markibx-connect/*` → :8244 | **yes** (gate, `site=markibx`) |
 
 - The **site-gate** (`xwauth-id-gate`, :8051) is wired as Caddy `forward_auth` in
-  front of karaa.net / `:8137` / mawtarx.com. Requests to `/_gate/*` reverse-proxy
-  straight to it. **markibx.com is NOT gated at the edge** — its API is publicly
-  reachable (verified: `https://markibx.com/api/markibx/v1/health` → 200).
+  front of karaa.net / `:8137` / mawtarx.com **and markibx.com**. Requests to `/_gate/*`
+  reverse-proxy straight to it. **markibx.com is now edge-gated too** — every `/api/markibx/*`
+  route (incl. `/health`) 302s to `/_gate/login?site=markibx` (verified 2026-07-30; this
+  reverses the earlier "public" note). So verify markibx deploys over **loopback on the box**
+  (`curl http://127.0.0.1:8242/...`), not the public domain.
 
 ## Config wiring (env files)
 
@@ -175,16 +177,25 @@ dominated by **mawtarx-api's** listings pulled over HTTP — karaa-api's own sto
 a few-thousand-row snapshot. So "seeded, not growing" applies to karaa-api's *own* store,
 not to the federated total the homepage serves.
 
-## Scraping — not running in prod
+## Scraping — a systemd runner, NOT cron (don't read `/etc/cron.d` and conclude "off")
 
-- **No scraping process is running** (re-verified 2026-07-17). The only connector-related
-  process up is the `mawtarx-connect-api` **HTTP surface** (:8253). There is **no
-  `collect.py` crawl running**, and **no scraping cron/timer**
-  (`/etc/cron.d` holds only `e2scrub_all` and `exonware-security`).
-- This matches the ecosystem note that mawtarx-connect is *being built, not running*.
-  The connector work in `repos/mawtarx-connect` (the ~625 providers) is developed and tested
-  locally against the same **xwjson / xwstorage-db** store used everywhere else; it is **not**
-  feeding this server today.
+- **`mawtarx-scraper-runner` (systemd *service*) sweeps ~7 Saudi sources.** Live-verified
+  actively sweeping **2026-07-30** (PID last restarted 07-29 05:00 — the box is shared and
+  units get restarted/reverted, so re-verify: `systemctl is-active mawtarx-scraper-runner` +
+  `sudo xw-backend-logs mawtarx-scraper-runner`). Latest full sweeps that day: saudisale ~4.7k,
+  syarah ~3.9k, opensooq ~2.7k, sayarat ~2.3k, samaco 64. mawtarx holds **~19k active listings**
+  (incl. 5.1k legacy dubizzle NOT in the sweep set). The runner logs `reconcile=True`, but that
+  is only the *runner-side request* — the destructive act is server-side gated by
+  `MAWTARX_RECONCILE_ENABLED` (root-600, unverifiable), so this is not proof reconcile is armed.
+- **It's a service, not a cron/timer** — `/etc/cron.d` holds only `e2scrub_all` +
+  `exonware-security`, so a cron check finds nothing and mis-reads as "no scraping." The old
+  Postgres `collect.py`/`daemon.py` path was deleted 2026-07-19; the runner
+  (`python -m exonware.mawtarx_connect.runner`, from `feat/price-history-observed`) scrapes
+  and POSTs batches to mawtarx-api's `/ingest/*`, keeping mawtarx-api the sole store writer.
+- **haraj=0 / motory=0 every sweep is intentional gating**, not breakage (haraj WAF/partner
+  deal; motory is a disabled stub) — they log no error, so a silent break looks identical.
+- **The scrape output does NOT reach karaa.net** — karaa-api runs `listings_mode=local`, so
+  the fresh ~18.5k listings benefit mawtarx.com only until karaa flips back to `hybrid`.
 
 ## Reliability & security bits
 

@@ -16,6 +16,26 @@ touching a contract, a route, or two repos runs the whole thing. Skipping a step
 
 ---
 
+## Working here — shared box, uneven access, ground-truth first
+
+Hard-won; ignore one and you lose an hour:
+
+- **The box is shared and concurrently edited.** Other sessions touch the same `repos/*` at once —
+  you'll see `pyproject.toml`/test churn that isn't yours. **Commit scoped** (`git add <path>`,
+  never `git add -A`) or you land someone else's half-done work. A `git pull`/checkout in a repo
+  whose editable install a running process or ingest imports shifts code under it mid-run — finish
+  or stop background jobs first.
+- **Push access is uneven.** Backend repos (markibx\*, mawtarx\*, kara-api) push; **`kara-web` and
+  `markibx-web` are 403** — frontend changes go through their owners. Check before promising a deploy.
+- **The VPS is dev, and env is root-owned.** Service secrets (e.g. `XWBASE_SERVICE_TOKEN`) live in
+  `/etc/*.env` you can't read; a deploy that flips a fleet default (e.g. WS transport) can break on
+  an env mismatch you only see at restart. Probe the target venv/env first (deploy-vps skill).
+- **Cap the caution; lead with the number.** Don't re-verify state already established (ship on the
+  prior green unless told to re-check), and state the concrete count, not the vision — "3,533 models but
+  ~0% depth (identity-only shells)", not "the universal catalog" — before endorsing a plan.
+
+---
+
 ## 1. Orient — find out what's actually true
 
 Start with the target repo's own `CLAUDE.md` — it's the source of truth for that repo, and it
@@ -153,6 +173,18 @@ Every rule here was paid for in wall-clock on the xwmemory build (2026-07-26, 7 
   they say is missing. Sound reasoning on a false premise reads exactly like a real finding.
 - **One tree, one agent.** Slices sharing a working tree must run sequentially; parallelism needs
   worktree isolation, and a shared `.venv` makes that non-trivial. Plan for sequential.
+- **Worktree tests import MAIN's code, not the branch's.** The shared `.venv`'s editable install
+  `.pth` points at the *main* checkout's `src`, so `task test` / bare `pytest` in a worktree
+  silently tests main. Tell every worktree subagent to run
+  `PYTHONPATH=<worktree>/src <venv>/bin/python -m pytest` (never `task test`, never reinstall the
+  shared venv). Cost 2026-07-28: false-green risk across 5 parallel worktrees.
+- **Scope "finalize" delegations tightly.** If the deliverable is commit + verify, forbid
+  expensive re-runs (live network sweeps, full re-ingests) explicitly — an over-scoped finalize
+  agent burned ~45 min on a live SPARQL re-sweep for an idempotency check the task never needed.
+- **A background process a subagent spawns does NOT auto-resume the subagent.** A subagent that
+  launches a detached job and ends its turn "waiting for a notification" just stalls. Either forbid
+  detached jobs (finish in one turn) or resume it explicitly with `SendMessage` — cost 2026-07-28:
+  three resume cycles on one agent.
 
 ## 7. Land
 

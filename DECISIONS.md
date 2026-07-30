@@ -12,6 +12,86 @@ to a few lines — link the deep doc, don't inline it.
 
 ---
 
+## D-016 — catalog membership widened to Wikidata reality; a curated-gate keeps it from fragmenting curation
+
+**2026-07-30 · breadth run + deploy** — ran the live Wikidata membership widening across all 45
+makes (`markibx-connect/scripts/ingest_membership_widening.py --live`): **249 → 3,754 generations /
+3,533 models**, every new row an identity-only shell (QID-anchored, idempotent). Deployed to the dev
+VPS (markibx core into both markibx-api + mawtarx-api venvs). This is #4/#10 — the breadth D-015
+called unbuilt is now built.
+
+- **Curated-gate (the load-bearing call):** a naive full run *fragmented* curated identity — it
+  injected codeless QID-shells under 101 already-curated models (Accord +13, …) and split variants
+  ("Camry Hybrid") into their own models. Fix: every Wikidata entity is run through
+  `CanonicalRegistry.match_model` (D-015's seam); anything that folds into a curated model is
+  **skipped** (345 skipped), only the uncurated tail is created — ADR 0002 (matching decides
+  new-vs-existing, never creates identity). Rejected: blind full-run (fragments); accept-and-update
+  guard-tests (degrades resolve).
+- **QID pins:** `resolve_manufacturer_qid` mis-anchors (Ford→surname Q11247279, Mitsubishi→parent
+  conglomerate) and misses Hyundai/Suzuki/Skoda/Dongfeng, so the runner carries 7 verified
+  `MANUFACTURER_QID_PINS`; Jaecoo/Rox stay unresolved (too new for Wikidata).
+- **Depth is still 0%** — LLM candidate-corroboration (ADR 0010) is built but **not run** (postponed
+  by choice). Non-LLM depth harvesters (`spine_ingest/{dbpedia_year_ranges,epa_specs,nhtsa_dimensions}`,
+  `sources/*`) exist but haven't run across the breadth — that's the next step, year-ranges first.
+
+Code: markibx `1408320`, markibx-connect `2238ff3`. Completes D-015's "unbuilt" note.
+
+## D-015 — the legacy flat catalog is retired in code; the spine is the only catalog
+
+**2026-07-29 · implementation + deploy** — markibx ADR 0003's hard break (D-014 above) is **built
+across all repos and DEPLOYED to the dev VPS**. Deleted: `markibx/catalog.py` + `store_catalog.py` +
+`catalog_seed.py` + `catalog_entity.py` + `catalog_specs_seed.py` and every `CatalogVehicle`/
+`CatalogCar`/`ICatalogStore`/`catalog_key`/`resolve_car`/`flatten_car`/`seed_top_ksa_models`/
+`CATALOG_PROVIDERS` export; markibx-connect's connector-into-legacy-store pipeline
+(`wikidata_catalog`, `catalog_pipeline`, `launch_price`, the CatalogVehicle-builders in
+`nhtsa_catalog` — VIN decode kept). Consumers rewritten spine-native: markibx-api/mawtarx-api
+`routes/catalog.py` (resolve+browse, no flat surface), all three APIs' `state.catalog` is now a
+`CanonicalRegistry` (`build_seed_registry()`, data-as-code), kara-api dropped `MawtarxCatalogStore`.
+
+- **P3:** `mawtarx/catalog_link.py` links listings through the spine's `resolve()` seam
+  (precision ladder exact→generation→model; `catalog_car_id` holds a spine node id, not a
+  `catalog_key`). `catalog_msrp` reads launch price via `resolve_sheet` + best-trim fallback;
+  `catalog_lookup_from_store` is kept as an alias of `catalog_lookup_from_registry`.
+- **New seam:** `CanonicalRegistry.match_model(make, model)` (model-level link fallback).
+- **Deploy outcome (dev VPS, coordinated 6-repo, one ssh call per venv):** two facts were born at
+  deploy. (1) **kara-web compat shim** — we have no push access to kara-web, so `/catalog/vehicles`
+  is kept as a read-only flat-projection of the spine in mawtarx-api (+ a `vehicles` key on
+  `/catalog/stats`) so its Car Database holds its contract unchanged. (2) **kara-api pinned to HTTP**
+  transport — the newer code activates xwapi's WS-RPC `/service-ws`, gated by `XWBASE_SERVICE_TOKEN`,
+  which differs between the karaa-api/mawtarx-api env files on the box → gate mismatch broke every
+  proxied `/catalog`+`/pricing` call; HTTP is the known-good path (revert once the env tokens align).
+- **Served catalog was curate-first — 222 Gulf-curated models / 247 gens** at this deploy, not the
+  old ~9.6k rows; membership widening (#4/#10) has since run — see **D-016** (now 3,533 / 3,754).
+
+Supersedes nothing new; **completes** D-014's intent, deployed. Code: the diffs across the 7 repos.
+
+## D-014 — markibx is global-first; its catalog decisions now live in the repo's own ADRs
+
+**2026-07-27 · scope** — markibx was GCC-shaped for exactly one reason: **D-g defined catalog
+membership by mawtarx listing volume**, so the car knowledge base's contents were a function of one
+Saudi marketplace's inventory. A car nobody was advertising in Riyadh did not exist. That coupling
+is severed: **membership is manufacturing reality**; listing volume survives only as a
+*curation-order* signal.
+
+Six decisions now live in **`repos/markibx/docs/adr/`** (0001–0006), with that repo's `CONTEXT.md`
+as the domain glossary. They supersede or amend older entries: **D-g superseded** (membership),
+**D-b amended** (generation identity is a stable id, not a year range), **D-011 superseded** (the
+spine now *replaces* the legacy catalog rather than coexisting with it). D-c, D-d/D-009 and D-012
+are **upheld** unchanged.
+
+What matters at ecosystem level: `docs/markibx-mvp-catalog-model.md`'s GCC build order is no longer
+the plan, and retiring the legacy catalog is a **deliberate pre-1.0 break** across three repos
+(19 importing files — mawtarx 7, kara-api 7, markibx-api 5). It is affordable only because **prod
+pricing does not read the catalog** (see `repos/mawtarx/CLAUDE.md`).
+
+**The measurement that overturned the plan** (live, 2026-07-27): Wikidata has 13,780 car models but
+years for only **6%**; DBpedia has years for **80%**; EPA's bulk dataset carries displacement +
+cylinders for **97%** of 49,995 rows. So identity comes from Wikidata, years from DBpedia, specs
+from EPA — and **horsepower is unobtainable from any free source**. EPA is US-market only and misses
+Hilux/Patrol/Sunny/Pajero, so global breadth and GCC depth are now separate workstreams.
+
+Plan + tickets: `repos/markibx/docs/global-first-plan.md`, Exonware/markibx#3 (PRD) and #4–#13.
+
 ## D-013 — xwmemory keeps graphiti_core's extraction; we replaced only the storage layer
 
 **2026-07-26 · scope** — xwmemory's whole tool surface (`add_memory`, both search tools) now

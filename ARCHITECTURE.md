@@ -40,10 +40,10 @@ karaa is in development right now.
 | `kara-web`                                     | Frontend (Vite/TS) users actually see — karaa.net                                                               | LIVE — active                                           |
 | `mawtarx` (`exonware.mawtarx`)                 | Listings + intelligence core (pricing/deals/fraud/mojaz); resolves markibx in-process                           | **load-bearing** — prod pricing/deals/catalog           |
 | `mawtarx-api` (`exonware.mawtarx_api`)         | HTTP for mawtarx — port **8250**; kara-api proxies some car-intelligence endpoints here (current server config) | **load-bearing**, real                                  |
-| `mawtarx-connect` (`exonware.mawtarx_connect`) | Marketplace scrapers (625 registered) — the **library**                                                          | being built; **no crawl runs** (no collect/daemon, no cron) |
-| `mawtarx-connect-api`                          | HTTP surface for mawtarx-connect — port **8253**. A `karaa-connect-api` upstream. `XWActionRouter`.            | **LIVE service** — up, even though no scraping runs     |
+| `mawtarx-connect` (`exonware.mawtarx_connect`) | Marketplace scrapers (671 registered) — the **library**                                                          | library being built; in prod a **`mawtarx-scraper-runner`** systemd unit actively sweeps ~7 Saudi sources (live-verified 2026-07-30 — `docs/vps-current-state.md`) |
+| `mawtarx-connect-api`                          | HTTP surface for mawtarx-connect — port **8253**. A `karaa-connect-api` upstream. `XWActionRouter`.            | **LIVE service** — up                                   |
 | `mawtarx-web`                                  | Frontend for mawtarx.com                                                                                        | LIVE                                                    |
-| `markibx` (`exonware.markibx`)                 | Car knowledge base (specs/catalog); used in-process by mawtarx. Also carries the **catalog spine**: a canonical `make → model → generation` registry above the legacy `CatalogCar` rows, built from committed seed files on every boot (`data/spine_seed/`, 45 makes / 222 models), each fact tagged `{value, source, confidence}`. **Two catalog models coexist deliberately** (D-011) — don't "clean up" either. | **load-bearing** (via mawtarx)                          |
+| `markibx` (`exonware.markibx`)                 | Car knowledge base (specs/catalog); used in-process by mawtarx. Its **only** catalog is the **spine**: a canonical `make → model → generation` registry (`spine.py`) built from committed seed files on every boot (`data/spine_seed/`, 45 makes / 3,533 models / 3,754 generations), each fact tagged `{value, source, confidence}`; resolve via `resolve`/`resolve_sheet`, walk via `browse_*`. The legacy flat `CatalogVehicle`/`catalog_key`/`ICatalogStore` surface was **deleted** (markibx `docs/adr/0003`, superseding D-011; implemented across all repos 2026-07-29). **Deployed to the dev VPS 2026-07-29** (coordinated 6-repo deploy). Membership then **widened live from Wikidata (#25, deployed 2026-07-30)**: 249 → 3,754 gens / 3,533 models, all identity-only shells (**0% depth** — specs are a separate pass). Curated models kept intact — widening only creates the uncurated tail (curated-gate). | **load-bearing** (via mawtarx)                          |
 | `markibx-api` (`exonware.markibx_api`)         | HTTP for markibx — port **8240**. Real routes (catalog, mecha browse, auth, media proxy, mountables/identify/export/contributions), all `XWActionRouter`, no 501 stubs found. Not called by kara-api (which resolves markibx in-process) — but is consumed directly by markibx-web. | **LIVE**, real                                          |
 | `markibx-connect` (`exonware.markibx_connect`) | Car-fact connectors (NHTSA / Wikidata) — the **library**                                                         | being built                                             |
 | `markibx-connect-api`                          | HTTP surface for markibx-connect — port **8244**. A `karaa-connect-api` upstream. Plain `APIRouter`.            | **LIVE service**                                        |
@@ -100,10 +100,13 @@ split (building):  markibx  ←  mawtarx  ←  mawtarx-connect
 platform:          xwsystem  ←  (used by everything)
 ```
 
-markibx never imports mawtarx. A listing links to a car by `catalog_key` (`make|model|year|trim`).
+markibx never imports mawtarx. A listing links to a car by a **spine node id** stored on
+`VehicleListing.catalog_car_id` — a generation id (`toyota:camry:xv70`) when the year selects
+one, else a model id (`toyota:camry`) for a model-level link (ADR 0003 retired the old flat
+`catalog_key = make|model|year|trim`).
 
 **The karaa arrows are legacy shape, not weight.** After the July 2026 split, `kara-api`'s real
-dependency is **mawtarx** (imported in 26 files — stores, pricing, deals, mojaz, catalog), which
+dependency is **mawtarx** (imported in 30 files — stores, pricing, deals, mojaz, catalog), which
 pulls `markibx` in-process. `kara` appears in **3** files, only for the recommender; `kara-connect`
 is a shim that re-exports `mawtarx_connect`. So mawtarx+markibx must be installed in kara-api's
 venv — they are not optional extras, they are the product.
@@ -139,7 +142,7 @@ venv — they are not optional extras, they are the product.
 | Buyer personalization / recommendations      | `repos/kara` (`recommend.py`) — the only thing left in that repo                            |
 | Make/model/body-type autocomplete            | built in `mawtarx-api`, copy served by `kara-api` — see `repos/mawtarx-api/AUTOCOMPLETE.md` |
 | New split-architecture work                  | `repos/mawtarx` / `repos/markibx` families                                                  |
-| A trustable spec sheet (provenance/confidence) | `repos/markibx`'s **spine** — `GET /catalog/resolve` + `/catalog/browse/*` on markibx-api. Curated depth is an ongoing pass, so most models resolve identity-only today (honest 0% completeness, not a fake score). Seed caveats: `repos/markibx/.../data/spine_seed/README.md`; design: [`docs/markibx-mvp-catalog-model.md`](docs/markibx-mvp-catalog-model.md) |
+| A trustable spec sheet (provenance/confidence) | `repos/markibx`'s **spine** — `GET /catalog/resolve` + `/catalog/browse/*`, now the **only** catalog (the flat `/catalog/car*`/`/catalog/vehicles` surface was deleted, ADR 0003). 3,754 generations / 3,533 models (breadth-widened from Wikidata #25, deployed 2026-07-30) — but **identity-only, 0% depth**; only the old ~110 curated gens carry any specs (EPA/NHTSA). **Hard break DEPLOYED to dev VPS 2026-07-29.** Global-first: membership is what was manufactured, not what mawtarx has listed. Decisions: `repos/markibx/docs/adr/` (0001–0008) + [`docs/markibx-mvp-catalog-model.md`](docs/markibx-mvp-catalog-model.md) for the superseded GCC framing |
 | A shared utility (auth, storage, HTTP, …)    | **[`docs/tool-index.md`](docs/tool-index.md)** first — then that lib's `CLAUDE.md`          |
 
 ## More

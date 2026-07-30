@@ -2,16 +2,18 @@
 
 Terms agents keep re-deriving. Each fact has one home; this is the shortlist.
 
-- **VehicleListing vs CatalogVehicle** — the distinction everything else hangs off.
+- **VehicleListing vs the catalog spine** — the distinction everything else hangs off.
   A **VehicleListing** (`mawtarx/types.py`) is *one seller's car at a point in time*: price,
-  mileage, city, seller, photos, condition. A **CatalogVehicle** (`markibx/catalog.py`) is the
-  *reference spec* for a make/model/year/trim — no price, no seller, no mileage. A listing
-  links to a catalog entry by `catalog_key`. (Older docs call the latter `CatalogCar`; that
-  name is gone.)
+  mileage, city, seller, photos, condition. The **catalog** is the markibx **spine**
+  (`markibx/spine.py`): a curated `make → model → generation` registry of *reference specs* —
+  no price, no seller, no mileage — each fact `{value, source, confidence}`. A listing links to
+  a spine node by `catalog_car_id` (see below). The old flat `CatalogVehicle`/`CatalogCar` type
+  and its `markibx/catalog.py` module were deleted (ADR 0003).
 
-- **catalog_key** — a car's identity in the catalog: `make|model|year|trim`.
-  `year == 0` = model-level parent (specs shared across years); `year > 0` = per-year
-  child that inherits the parent and overrides only what changed.
+- **catalog_car_id** — a listing's link to the catalog spine: a **generation id**
+  (`toyota:camry:xv70`) when the listing's year selects one, else a **model id**
+  (`toyota:camry`) for a model-level link. It replaced the retired flat
+  **`catalog_key`** (`make|model|year|trim`), which no longer exists.
 
 - **generation** *(MVP catalog model — [`docs/markibx-mvp-catalog-model.md`](markibx-mvp-catalog-model.md))* —
   a model's design cycle: a year-range + manufacturer code (Camry `XV70`, 2018–2024). Specs

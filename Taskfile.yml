@@ -17,6 +17,18 @@ vars:
   MAWTARX: mawtarx mawtarx-api mawtarx-connect mawtarx-connect-api
   MARKIBX: markibx markibx-api markibx-connect markibx-connect-api
   WEB: kara-web mawtarx-web markibx-web
+  # Parallel workers for pytest-xdist. Capped at 3, NOT `auto`: a worker building a
+  # full app + embedded xwstorage DB costs ~250-500 MB, and a 16-core box has far
+  # more cores than the RAM to run 16 of those. `_fanout` runs one repo at a time,
+  # so peak = WORKERS × one repo's per-worker cost. Beefier box: `WORKERS=6 task test`.
+  WORKERS:
+    sh: 'n=$(nproc 2>/dev/null || echo 2); [ "$n" -lt 3 ] && echo "$n" || echo 3'
+  # ONLY these repos run under xdist. The rest stay single-process on purpose: the
+  # small suites (markibx-api, kara, the *-connect repos) would pay the ~5s per-worker
+  # import cost N times over, which swamps any gain — they finish faster in-process.
+  # The three below are heavy enough (full-app / CPU-bound suites) that -n3 clearly
+  # wins, and all three are per-test isolated so parallel/reordered runs are green.
+  PARALLEL_REPOS: mawtarx kara-api mawtarx-api
 
 tasks:
   doctor:
@@ -65,7 +77,11 @@ tasks:
           [ -d "$d" ] || { printf '  %-22s NOT CLONED\n' "$r"; continue; }
           # -o addopts=-q pins verbosity: several repos already set addopts="-q" in
           # pyproject, and a second -q makes pytest drop the summary line entirely.
-          out=$(cd "$d" && "{{.PY}}" -m pytest --no-header -o addopts=-q 2>&1) || true
+          # Only PARALLEL_REPOS run under pytest-xdist; the rest use -n0 (in-process).
+          # --dist loadfile keeps a file's tests on one worker, so intra-file order is
+          # preserved and the uneven suites load-balance across workers.
+          n=0; case " {{.PARALLEL_REPOS}} " in *" $r "*) n="{{.WORKERS}}" ;; esac
+          out=$(cd "$d" && "{{.PY}}" -m pytest --no-header -o addopts=-q -n "$n" --dist loadfile 2>&1) || true
           if printf '%s' "$out" | grep -q 'error during collection'; then
             printf '  %-22s CANNOT COLLECT -- run `task doctor`; if clean, the repo is behind a library rename\n' "$r"
             fail=1

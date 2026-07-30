@@ -1,10 +1,20 @@
 # markibx MVP catalog model — curated canonical spine
 
+> ⚠️ **SUPERSEDED 2026-07-27 — this doc's GCC scoping is no longer the plan.** markibx is now
+> **global-first**: catalog membership is what was *manufactured*, not what mawtarx has listed, so
+> **D-g is dead** and with it the "~80% of GCC listings" build order below. **D-b** (generation =
+> year-range + code) is amended and **D-011** (spine coexists with legacy) is reversed. Current
+> decisions: **`repos/markibx/docs/adr/`** 0001–0006; current plan:
+> `repos/markibx/docs/global-first-plan.md`; ecosystem summary: `DECISIONS.md` D-014.
+> **D-c, D-d, D-e, D-f and D-h below still hold** — read this doc for those and for the model
+> itself, not for scope or sequencing.
+
 **Status:** **built and merged to `main`** 2026-07-27 (markibx `b9d8729`, markibx-api `57a823a`;
 markibx-web merged locally only — no push access). Steps 1, 3, 5, 6, 7 of the build order below
 are done; **2a** is done as a machine-derived identity batch (222 models / 45 makes, 80.08%
-SA-listing coverage) with its curated-alias half still open; **2b is deliberately continuous**
-(D-010). Not deployed to the VPS. Terms: [`glossary.md`](glossary.md). Current code truth:
+SA-listing coverage) — that batch's fabricated `DATA-<start>-<end>` codes are now scheduled for
+re-keying (ADR 0002). **Never deployed to the VPS** — `/catalog/resolve` is 404 in prod, verified
+2026-07-27. Terms: [`glossary.md`](glossary.md). Current code truth:
 `repos/markibx/CLAUDE.md` and `repos/markibx/src/exonware/markibx/data/spine_seed/README.md` —
 that README holds the seed's live caveats (SA-only ranking, year window, mechanical aliases,
 the `baw`=FAW upstream normalizer bug).

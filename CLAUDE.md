@@ -17,7 +17,7 @@ trigger, not a suggestion:
 | …write or change **any** code                                          | **`AGENTS.md`** (the loop + conventions)                               |
 | …write **any** utility, helper, or client                              | **`docs/tool-index.md`** — it probably already exists                  |
 | …claim _why_ something is the way it is, or reverse a design           | **`DECISIONS.md`**                                                     |
-| …use a term you can't define (`catalog_key`, `dedup_key`, `make_norm`) | **`docs/glossary.md`**                                                 |
+| …use a term you can't define (`catalog_car_id`, `dedup_key`, `make_norm`) | **`docs/glossary.md`**                                              |
 | …touch a specific repo                                                 | that repo's own **`CLAUDE.md`** — truth for that repo, and its gotchas |
 | …claim code works, or that something is broken                         | run it: **`task doctor`** then **`task test`** (root `Taskfile.yml`)   |
 
