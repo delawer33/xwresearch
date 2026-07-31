@@ -5,6 +5,14 @@ description: Deploy changes from the kara/karaa, mawtarx, or markibx repos to th
 
 # Deploy to exonware-riyadh-01
 
+> **⚠️ THIS BOX IS DEV, NOT PRODUCTION** (confirmed by the owner 2026-07-31).
+> `exonware-riyadh-01` / `149.104.105.145` (karaa.net, mawtarx.com, markibx.com) is the
+> **development/staging** environment — not a customer-facing production deployment. Still be
+> careful (it's shared by multiple agent sessions, holds the only convenient real-data corpus,
+> and a bad deploy blocks other people's work), but do NOT reason about it as prod: a brief
+> service stop for an offline data op is acceptable here, and "prod" language elsewhere in these
+> docs means "this live dev box", not a separate production tier.
+
 > **Companion doc:** `docs/vps-current-state.md` is the live-verified snapshot of
 > how the box is actually wired right now (services, ports, venvs, env files,
 > Caddy routes, data dirs). Read it for *what's running*; this skill is *how to
