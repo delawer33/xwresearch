@@ -108,10 +108,16 @@ diagnosis instead.
 <!-- in-scope fog toward the destination, or the next horizons; graduates to tickets as the
      frontier advances. Deliberately coarse. -->
 
-- **GCC activation (next horizon)** — UAE/KW/QA/BH/OM connectors already exist and sit in
-  `collect.yaml`; the runner just doesn't sweep them. When Saudi is "working", graduate:
-  which countries first, turning the runner on, and validating the multi-currency price
-  pipeline end-to-end (no non-SAR row exists today to prove it).
+- ~~**GCC activation (next horizon)**~~ — ✅ **CHARTED 2026-08-02, and it lives outside this map**
+  (user's call): plan-of-record = **`repos/mawtarx-connect/docs/gcc-activation-plan.md`**
+  (per-country loop UAE→KW→QA→BH→OM; done-bar = data-live + best-achievable-coverage/normalization;
+  Iteration-0 registry cleanup + liveness-probe harness; repair doctrine; per-iteration
+  retrospective → `docs/gcc-connector-field-notes.md`).
+  **Correction to the old fog note:** the prod runner does **not** read `collect.yaml` — it sweeps
+  `sweep_profiles.py._DEFAULTS` (7 Saudi). Two different config surfaces. Activation is an
+  in-package code edit + deploy → **shukri-writable, NOT root-gated**, and reconcile-safe per-source
+  (a new country's first full sweep only seeds a baseline). So GCC does **not** wait on the boss's
+  reconcile step.
 - **Currency-native read contract** — kara-api's valuation DTO is SAR-named
   (`fair_value_*_sar`); pan-GCC needs native-currency read fields. Sharpens once a second
   currency has real data.
