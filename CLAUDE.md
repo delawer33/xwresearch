@@ -13,6 +13,7 @@ trigger, not a suggestion:
 
 | Before you…                                                            | Read                                                                   |
 | ---------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| …plan, grill, or design **any feature** (before designing behaviour)   | ask the layer question **xw > product > project** and **record the answer** — does this belong in an `xw*` package first? (cascade: **`AGENTS.md` §2**) |
 | …reason about what exists, what's live, or what talks to what          | **`ARCHITECTURE.md`**                                                  |
 | …write or change **any** code                                          | **`AGENTS.md`** (the loop + conventions)                               |
 | …write **any** utility, helper, or client                              | **`docs/tool-index.md`** — it probably already exists                  |

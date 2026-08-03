@@ -159,6 +159,11 @@ payload shape it holds for. Budgets live in each repo's `docs/REF_54_BENCH.md`.
 
 Every rule here was paid for in wall-clock on the xwmemory build (2026-07-26, 7 slices).
 
+- **Default every subagent to Opus unless the user named a model.** When spawning agents (the
+  `Agent` tool's `model`, or `agent(..., {model})` in a workflow), pass `opus` by default. Only
+  pick a different tier when the user explicitly says which model to run on (e.g. "run the finders
+  on sonnet", "use haiku for the cheap sweep") — then honour that. Don't silently inherit a
+  smaller session model for delegated work.
 - **They can't invoke `disable-model-invocation` skills.** Inline the loop you want instead of
   naming a skill they'll silently fail to load.
 - **Forbid `SendMessage` in reviewers:** *"your final response text IS your report, just end your
