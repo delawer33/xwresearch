@@ -76,7 +76,16 @@ reality of the site, reality wins (and note the deviation in
 
 - **A block looks exactly like "no results".** A WAF/challenge page can be HTTP 200 that parses
   to nothing; `raw=0 persisted=0` with a clean DONE is a red flag, not a pass. Make the scraper
-  distinguish blocked from empty (`haraj.py` raises on the block response).
+  distinguish blocked from empty (`haraj.py` raises on the block response). Zero rows → one
+  `httpx.get` with a browser UA and check four things, which separate wall / SPA / drift in a
+  single call: **status**, **`<title>`**, wall markers in the body (`cloudflare`, `captcha`,
+  `challenge`, `datadome`, `enable javascript`), and whether the HTML contains any listing hrefs /
+  `__NEXT_DATA__` / `ld+json` at all. (`cars24.ae` = 403 Cloudflare → park. `sellanycar.ae` = a
+  perfectly healthy-looking **200 with 18 KB of Angular shell** and zero listings → park.)
+- **A full row count can hide an empty core field.** Count field-fill, not just rows: `opensooq`
+  returned 25/25 rows for years while `year` was `0` on ~100% of them (title-prefix-only parse) —
+  and a zero year silently killed `trim` too, because trim was located relative to the year token.
+  Prices without a year are useless to pricing. Check the fields pricing needs, on live rows.
 - **Seller-chosen dropdowns are noise, not specs.** Trusting a marketplace's own "Category" gave
   `bahraincars` 89% wrong `body_type`.
 - **Loosely-scoped first-match regex grabs the wrong element** — locate the authoritative element,
