@@ -138,6 +138,44 @@ tasks:
     cmds:
       - "{{.TASKFILE_DIR}}/.claude/skills/run-local-stack/run-stack.sh stop"
 
+  # Repo leases -- who is allowed to touch which part of which main checkout while
+  # several agents run at once. Enforcement is the PreToolUse hook in
+  # ~/.claude/settings.json; these are the operator's windows into it.
+  claims:install:
+    desc: Register the lease hook in ~/.claude/settings.json (once, then restart sessions)
+    cmds:
+      - "{{.PY}} {{.TASKFILE_DIR}}/scripts/repo_lease.py install-hook {{.CLI_ARGS}}"
+
+  claims:
+    desc: Show which agent holds which section / git state right now
+    cmds:
+      - "{{.PY}} {{.TASKFILE_DIR}}/scripts/repo_lease.py claims {{.CLI_ARGS}}"
+
+  claims:reap:
+    desc: Drop leases whose holder is gone (expired TTL or dead process)
+    cmds:
+      - "{{.PY}} {{.TASKFILE_DIR}}/scripts/repo_lease.py reap"
+
+  claims:decide:
+    desc: 'Record a verdict for an ASK-OWNER pair (task claims:decide -- <repo> <scope-a> <scope-b> allow|deny)'
+    cmds:
+      - "{{.PY}} {{.TASKFILE_DIR}}/scripts/repo_lease.py decide {{.CLI_ARGS}}"
+
+  claims:take:
+    desc: 'Take a lease by hand (task claims:take -- repos/mawtarx --scope src --intent "why")'
+    cmds:
+      - "{{.PY}} {{.TASKFILE_DIR}}/scripts/repo_lease.py claim {{.CLI_ARGS}}"
+
+  claims:drop:
+    desc: Drop leases you took by hand (task claims:drop -- --repo repos/mawtarx)
+    cmds:
+      - "{{.PY}} {{.TASKFILE_DIR}}/scripts/repo_lease.py release {{.CLI_ARGS}}"
+
+  test:workspace:
+    desc: Test the workspace's own tooling (tests/, not a product repo)
+    cmds:
+      - "{{.PY}} -m pytest {{.TASKFILE_DIR}}/tests {{.CLI_ARGS}}"
+
   default:
     cmds:
       - task --list

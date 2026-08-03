@@ -21,10 +21,30 @@ touching a contract, a route, or two repos runs the whole thing. Skipping a step
 Hard-won; ignore one and you lose an hour:
 
 - **The box is shared and concurrently edited.** Other sessions touch the same `repos/*` at once —
-  you'll see `pyproject.toml`/test churn that isn't yours. **Commit scoped** (`git add <path>`,
-  never `git add -A`) or you land someone else's half-done work. A `git pull`/checkout in a repo
-  whose editable install a running process or ingest imports shifts code under it mid-run — finish
-  or stop background jobs first.
+  you'll see `pyproject.toml`/test churn that isn't yours. **Commit scoped**
+  (`git commit -- <path>`, never `git add -A`) or you land someone else's half-done work.
+  A `git pull`/checkout in a repo whose editable install a running process or ingest imports
+  shifts code under it mid-run — finish or stop background jobs first. **Leases enforce this**
+  — see below.
+- **Repo leases: work in a worktree, lease the main checkout.** A `PreToolUse` hook
+  (`scripts/repo_lease.py`) coordinates the *main* checkouts; worktrees need no coordination and
+  are the normal way to work. What you'll actually meet:
+  - Edits auto-take a **section** lease (the file's directory, or the file itself in a flat
+    directory like `providers/`). Non-overlapping sections run in parallel; overlapping ones are
+    denied with a ready-made `git worktree add` line — take it, don't argue with it.
+  - **Name your paths when committing.** `git commit -- <your files>` is allowed while another
+    agent is in the checkout; bare `git commit`, `-a`, `add .`, `add -A` are refused because they
+    sweep up their half-written work. `reset`/`checkout`/`stash`/`pull` are refused outright while
+    someone else holds a section — there is no scoped form.
+  - A **merge or rebase in progress** makes that repo exclusive. Merging N repos at once takes all
+    N leases or none.
+  - **ASK-OWNER means stop and ask the human**, quoting both intents — it fires on shared files
+    (`pyproject.toml`, `__init__.py`, `version.py`) where a path can't tell you if the two changes
+    collide. Their answer is recorded once via `task claims:decide` and never asked again.
+  - `task claims` shows who holds what · `task claims:reap` clears dead holders ·
+    `XW_LEASE_OFF=1` bypasses the hook (say so if you use it) ·
+    `task claims:install` registers it in a new environment ·
+    `task claims:take` / `task claims:drop` for a deliberate wide claim.
 - **Push access is uneven.** Backend repos (markibx\*, mawtarx\*, kara-api) push; **`kara-web` and
   `markibx-web` are 403** — frontend changes go through their owners. Check before promising a deploy.
 - **The VPS is dev, and env is root-owned.** Service secrets (e.g. `XWBASE_SERVICE_TOKEN`) live in

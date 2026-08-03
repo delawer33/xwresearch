@@ -5,3 +5,12 @@ xw3d/
 
 # Per-machine dev-server config: paths are local/session-scoped, not shareable.
 .claude/launch.json
+
+# Live repo-lease state: whose session holds which section right now. Machine-
+# and moment-scoped, and committing it would hand another checkout stale leases.
+# The owner's ASK-OWNER verdicts (decisions.jsonl) are kept too -- they name
+# local session ids and are cheap to re-answer.
+.claude/locks/
+
+__pycache__/
+*.pyc

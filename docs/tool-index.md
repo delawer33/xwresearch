@@ -17,6 +17,7 @@ reinvented. **Status** tells you whether the tool is proven in this product or j
 | Read/write one field of a large JSON doc without loading the whole file | `xwjson` (usually via `xwstorage-db`) | **live** |
 | Persist product data (the actual database) | `xwstorage-db` (`exonware.xwstorage.db`) | **live** — most-imported storage surface. **Read [`xwstorage-db-guide.md`](xwstorage-db-guide.md) before any write-path or capacity work** — the default durability is the slow one, and the write path takes no cross-process lock (a fencing-lease primitive exists but isn't wired in) |
 | Cross-process file lock (one writer at a time) | `xwsystem` (`io.FileLock`) | **live** — kernel `flock`/`msvcrt`, crash-safe, `SHARED`/`EXCLUSIVE`. Was `open(...,"x")`-based and broken until 2026-07; anything that hand-rolled a lockfile should use this |
+| Own *part* of a resource across processes that come and go (who may touch which section) | `xwsystem` (`io.LeaseRegistry`) | **live, one caller** — scoped leases in one JSON file: hierarchical scope overlap, all-or-nothing multi-resource acquire, TTL + dead-pid reap, per-kind TTL, steal-with-reason. Stdlib-only and **path-loadable** (`spec_from_file_location`) so a latency-critical caller skips the ~1.4s `exonware.xwsystem` import. Wired into the agent-collision hook (`scripts/repo_lease.py`) |
 | Cross-process ownership with a fencing token (reject a resumed stale writer) | `xwstorage-db` (`db.fencing.PartitionLease`) | **built, unwired** — stronger than a plain lock for single-writer stores; not yet exported or called by any write path |
 | Store a `(timestamp, value)` series (price history, metric trends) | `xwstorage-db` → `db.timeseries()` | **live** — mawtarx's observed price history (`price_series.py`). Range/downsample/retention built in; don't hand-roll one. `points` is a property, `first`/`latest` are methods |
 | Shared money/value type | `xwschema` (`Price`) | **live** — every core+api repo |
@@ -55,6 +56,8 @@ writing another venv/CI helper.
 | Find the right interpreter | `scripts/find-python.sh [--check]` | `$XW_PYTHON` > active venv > `repos/.venv` > `python3`. Every repo `Taskfile` uses it; never hardcode `repos/.venv` |
 | Reproduce CI locally (~60s) | `task ci:local -- <repo>` | Clones 28 siblings into a scratch dir, builds the venv, runs doctor + pytest |
 | Regenerate the CI workflows | `task ci:gen` | One template → 12 repos. Edit `scripts/ci-workflow.yml.template`, never the copies |
+| See who is editing what right now | `task claims` | Live repo leases across all agents. `task claims:reap` clears dead holders, `task claims:decide` records an ASK-OWNER verdict, `task claims:install` registers the hook. Protocol: `AGENTS.md` §"Repo leases" |
+| Test the workspace's own tooling | `task test:workspace` | `tests/` at the root — the lease hook's suite. `task test` covers product repos only |
 
 Three facts these encode, each of which cost an afternoon to find:
 

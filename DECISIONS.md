@@ -12,6 +12,31 @@ to a few lines — link the deep doc, don't inline it.
 
 ---
 
+## D-017 — concurrent agents: worktrees by default, scoped leases on the main checkout
+
+**2026-08-03 · repo-lease system** — 5+ sessions run against `repos/*` at once, and two agents in one
+main checkout corrupt each other through *git state*, not through files: the index and `MERGE_HEAD`
+are repo-wide even when the edits are disjoint. Decided: **worktrees stay the normal way to work**
+(no coordination needed — own index, own HEAD), and leases cover only the main checkout. Within it,
+a **section** lease (the file's directory, or the file itself in a flat dir like
+`mawtarx-connect/providers/`, 663 siblings) lets non-overlapping work proceed — the ~80% case — while
+a **vcs** lease serialises git commands and a **merge** lease makes the repo exclusive while a
+transition is in flight.
+
+**Rejected:** section-only granularity with no git rule (unsafe — a "small change" agent's bare
+`git commit` commits another agent's half-resolved merge), and worktree-everything (a 3-line doc fix
+shouldn't cost a checkout, and the shared `repos/.venv` editable installs point at *main*).
+**The rule that makes concurrency safe is the pathspec:** `git commit -- <paths>` ignores whatever
+else is staged, so index-wide git commands are refused while someone else holds a section.
+
+Undecidable cases (shared files like `pyproject.toml`) return **ASK-OWNER** rather than guessing;
+the owner's verdict is recorded once in `.claude/locks/decisions.jsonl`. Fails **open for edits,
+closed for destructive git** — an unprotected edit costs a merge conflict, an unprotected merge
+costs a commit. Primitive: `xwsystem` `io.LeaseRegistry` (P1, stdlib-only, path-loadable because
+`import exonware.xwsystem` costs ~1.4s — itself a violation of AGENTS.md:132, filed as
+[xwsystem#6](https://github.com/Exonware/xwsystem/issues/6)). Policy: `scripts/repo_lease.py`.
+Protocol: `AGENTS.md` §"Repo leases".
+
 ## D-016 — catalog membership widened to Wikidata reality; a curated-gate keeps it from fragmenting curation
 
 **2026-07-30 · breadth run + deploy** — ran the live Wikidata membership widening across all 45
