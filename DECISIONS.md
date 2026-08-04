@@ -30,7 +30,28 @@ after those collections move into the store). `to_thread` buys loop *responsiven
 throughput — the GIL still serialises CPU-bound Python.
 
 Verified in kara-api only; **mawtarx-api and markibx-api are unswept.** Guard:
-`kara-api/tests/test_event_loop_blocking.py` (a shrink-only ratchet, async-only detection).
+`kara-api/tests/test_event_loop_blocking.py` (a shrink-only ratchet, async-only detection; it scans
+every `routes` dir under the package, not just the top-level one).
+
+**Landed + deployed 2026-08-04** as kara-api `main` `1c022af..194a1a7`. Two follow-on rulings from
+reconciling it with 20 commits of `origin/main`:
+
+- **A handler needing one `await` in the middle of sync O(N) work is split in three, not wrapped
+  whole.** Sync half in a private `_helper` behind `to_thread`; the genuinely async step
+  (`state.identity.get`, `resolve_seller_profile`) stays in the handler; render back in a worker.
+  The helper returns `None` for "not found" and the handler raises `HTTPException`, so the 404
+  never happens inside the worker thread. Pattern: `routes/v1/sellers.py:get_seller`,
+  `routes/listings.py:listing_intelligence`. **Rejected:** running the whole body in a thread with
+  a nested event loop, and hoisting the O(N) half onto the loop to keep one flat function — the
+  first is fragile, the second silently undoes the fix.
+- **Converting `def` → `async def` purely to gain an `await` must be paired with that split.** It
+  doesn't make the handler *newly* blocking on this engine (see above), but it is the moment the
+  whole body joins the loop's critical path in a form the ratchet can see. `origin/main` did
+  exactly this to `listing_intelligence`, which is how the ratchet caught it.
+
+Measured live after deploy: a ~4s `/listings/{id}/intelligence` runs while `/health` answers in
+25–160 ms. Caveat for anyone quoting it — the box is `listings_mode=local` with 2,325 rows, so the
+pre-deploy baseline was already fast. It's evidence the loop stays free, not that the site sped up.
 
 ## D-019 — the native ABI binder is optional, and a rate limit that can't be evaluated denies
 

@@ -155,22 +155,57 @@ email/smtp commits, none touching `facade.py`) → FF → push → branch delete
   `api.github.com` both succeeded. So it's `gh`'s transport, not the network or the token. If `gh`
   stonewalls, `gh auth token` + a direct POST works (that's how #2 and the #1 comments landed).
 
-## karaa-api#3 — event-loop starvation fixed, COMMITTED BUT NOT LANDED
+## karaa-api#3 — event-loop starvation fixed, LANDED + DEPLOYED
 
-`repos/kara-api` worktree `.claude/worktrees/ka-3-event-loop`, branch
-`perf/unblock-event-loop`, commit **18f0e3b**. Not merged, not pushed, not deployed; **#3 left
-open**. Suite 175 pass; the 6 failures in `test_api.py::test_order_sensitive_suite_stays_stable`
-+ `test_trim_catalog.py` are **proved pre-existing** (identical in a clean detached checkout at
-`13a9f8d`) — don't re-debug them.
+`main` **`1c022af..194a1a7`** — `18f0e3b` the fix, `194a1a7` the merge with 20 commits of
+`origin/main`. Installed into `/opt/karaa-api/.venv`, `karaa-api.service` restarted 16:33 +03,
+healthy, **zero** error lines, `catalog/stats` still matches mawtarx-api. Worktree removed.
+**#3 was already closed by the owner at 13:26Z**, before the work landed — nothing to close.
 
-**Why it didn't land: local `main` is 20 commits behind origin** — the same trap the entry above
-records, twice in one day. A trial merge onto real `origin/main` leaves **2 conflicts**:
-`authorizer.py` (trivial — upstream's `ANALYTICS_SCOPES` vs my `logger`) and
-`routes/v1/sellers.py` (**not** mechanical: upstream's `get_seller` now does
-`await state.identity.get(...)` inside the handler, and my refactor moved that body into a sync
-function for `to_thread` — the resolution has to split the awaited identity lookup from the
-offloaded inventory scan). Resolving security-adjacent auth code blind at session end, then
-deploying it, is how the 2026-07-15 stale-deploy incident happened.
+Merged-tree suite: **232 passed, 7 failed** — all 7 reproduce identically in a clean detached
+checkout of `origin/main`: `test_api.py::test_order_sensitive_suite_stays_stable`, 5 in
+`test_trim_catalog.py`, and upstream's own
+`test_home_brand_shortcuts.py::test_equal_counts_tie_break_saudi_popularity_not_az`, **which
+arrived red on origin/main**. Don't re-debug any of them.
+
+**The measured proof, on the live box.** `/listings/{id}/intelligence` costs ~4s of real work
+there. Fired it and polled `/health` every 0.5s throughout: health answered in **25–160 ms** the
+whole time. That handler is exactly the shape that produced the 2.3s health check which rolled
+back the F2/F3 deploy on 2026-07-14. Cold-vs-warm also confirms the new caches are real:
+`/listings/recommended` 1.37s → 0.07s, `/listings/popular-brands` 0.44s → 0.05s,
+`/search/autocomplete` 0.18s → 0.03s.
+
+**Calibrate before quoting any of that.** The box is `listings_mode=local` with **2,325** rows,
+so the pre-deploy baseline was ALREADY fast — health 3 ms, and 10 concurrent heavy requests plus
+5 health all under 40 ms. The starvation this removes needs the hybrid ~15k corpus or a genuinely
+slow handler. The honest claim is "a 4s request no longer holds the loop", not "the site got
+faster". Also: an external `https://karaa.net` health check read **10.8s once** and 0.77s
+after — 10.29s of the first was TLS handshake, not the app. Loopback was 30 ms throughout.
+
+**Two conflicts, resolved rather than picked a side.** `authorizer.py` trivial. `v1/sellers.py`
+not: upstream added `await state.identity.get(...)` inside the very handler body this branch had
+moved into a sync `to_thread` callable. Split in three — sync inventory read in the worker, async
+identity lookup on the loop, render back in a worker. Upstream's behaviour preserved exactly,
+except its bare `except Exception: pass` became two narrowed handlers that log, because an
+identity-store outage and an unregistered seller were indistinguishable.
+
+**The ratchet caught a real regression in anger, on code it wasn't written for.** `origin/main`
+turned `routes/listings.py:listing_intelligence` from `def` to `async def` (to gain an await)
+while it still did `buyer_store()` + `analyze_listing()` inline — precisely what #3 is about.
+`tests/test_event_loop_blocking.py` failed on it; fixed the same way as `get_seller` rather than
+widening `ALLOWED`, which is what the ratchet's contract demands. It now scans **every** `routes`
+dir under the package too, because upstream mounted a second admin surface at `analytics/routes/`
+on the same single worker, and a guard that stops at one directory lends its reassurance to
+surfaces it never looked at.
+
+**karaa-api main was unimportable for part of today, and the cause was cross-repo.**
+`origin/main`'s `security.py` imports `xwauth.id.authentication.auth_policy_store`, which existed
+only on an unmerged `xwauth-identity` branch — so the whole suite died at conftest and the service
+could not boot, exactly as the mawtarx-api/markibx-api break recorded earlier. Session
+`83c9d971` landed it (`xwauth-identity` main `107ea55`) and had already deployed it to
+`/opt/karaa-api/.venv` while I was mid-merge, which is the only reason this deploy needed no
+coordinated library push. **Do not read "kara-api main is green" as "kara-api is
+self-contained".**
 
 **The two findings that outlived the issue text:**
 
@@ -186,8 +221,9 @@ deploying it, is how the 2026-07-15 stale-deploy incident happened.
 **Upstream `4f91bc0` (AlShehri, Aug 2) is complementary, not duplicate** — it removed the per-row
 re-pricing inside `filtered_store_view` (126s of sync CPU per request) but added no `to_thread`:
 it fixed the cost, not the blocking. It independently corroborates the single-worker diagnosis.
-Consequence for the merge: `buyer_store()` is still an O(N) copy but far cheaper than at
-`13a9f8d`, so my comments calling it "the expensive half" should be toned down on landing.
+Consequence, applied on landing: `buyer_store()` is still an O(N) copy but far cheaper than at
+`13a9f8d`, so kara-api's `CLAUDE.md` no longer quotes the 126s figure as current — it records it
+as what `4f91bc0` removed.
 
 **One defect the review caught in my own work:** `@cached_endpoint`'s default
 `serialize="xwjson"` cannot encode a pydantic model, so the library declines to store it and the
