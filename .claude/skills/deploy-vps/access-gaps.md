@@ -5,14 +5,20 @@ gaps blocked or slowed real work on 2026-07-29. Run `xw-access-preflight` on the
 for the live picture; this is the standing request to whoever holds root to close them.
 Each is a small, scoped change — none needs blanket root for agents.
 
-## Gap 1 — no safe way to change one env var (BLOCKED Phase 2 reconcile)
+## Gap 1 — no safe way to change one env var (RECONCILE RESOLVED 2026-08-04; general case still open)
 
-**Symptom:** enabling `MAWTARX_RECONCILE_ENABLED=1` needs a one-line edit to
-`/etc/mawtarx-api.env`, but `shukri` cannot read it (`cat` → denied, `sudo cat` →
-password, `/proc/<pid>/environ` → denied), and `xw-backend-setup install-env`
-*replaces* the whole file. So the only options are (a) can't do it, or (b) blind
-full-file replace that drops `XWJSON_ABI_LIB` etc. → outage. The task died at the
-last step after being fully implemented.
+**✅ Reconcile is unblocked (2026-08-04).** The owner did not add an env-edit verb; instead
+reconcile is now armed through the admin **API** (no env file touched):
+```
+sudo xw-backend-setup admin-post mawtarx-api /api/mawtarx/v1/admin/reconcile '{"enabled":true,"acknowledge_drop":true}'
+```
+Token check landed alongside it: `sudo xw-backend-setup check-mawtarx-token karaa-api`.
+
+**Still open — the general case:** changing an *arbitrary* var in an existing
+`/etc/<svc>.env` (anything without its own admin route). `shukri` still cannot read it
+(`cat` → denied, `sudo cat` → password, `/proc/<pid>/environ` → denied), and
+`xw-backend-setup install-env` *replaces* the whole file, so a blind full-file replace would
+drop `XWJSON_ABI_LIB` etc. → outage.
 
 **Requested grant (pick one):**
 - **Preferred — a merge verb** in `xw-backend-setup`, root-side, so no secret is ever

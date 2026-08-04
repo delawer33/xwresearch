@@ -50,6 +50,10 @@ Hard-won; ignore one and you lose an hour:
 - **The VPS is dev, and env is root-owned.** Service secrets (e.g. `XWBASE_SERVICE_TOKEN`) live in
   `/etc/*.env` you can't read; a deploy that flips a fleet default (e.g. WS transport) can break on
   an env mismatch you only see at restart. Probe the target venv/env first (deploy-vps skill).
+- **Hit a root wall? Append to `ROOT_ASKS.md`** (workspace root): stage everything on the box first
+  so the entry is copy-paste-only for whoever has root, with verification one-liners. Don't route
+  around root via `xw-backend-setup install-unit` (it would work — see the file's FYI — but it
+  crosses the intended sudoers boundary; classifier blocks it anyway).
 - **Cap the caution; lead with the number.** Don't re-verify state already established (ship on the
   prior green unless told to re-check), and state the concrete count, not the vision — "3,533 models but
   ~0% depth (identity-only shells)", not "the universal catalog" — before endorsing a plan.

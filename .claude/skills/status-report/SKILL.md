@@ -2,133 +2,136 @@
 name: status-report
 description: >
   Write a brief, human-readable summary of recent work across the ecosystem's ~30
-  repos, grouped by theme (not by repo, not by commit). Use when the user asks for
-  "today's report", "status report", "what shipped today", "summarize today's
-  commits/work", or invokes /status-report. Pulls from real git history across
-  `repos/*` — never from this conversation's uncommitted work unless the user says
-  to include it.
+  repos — repo names first, one line per theme, ~60 seconds to read. Use when the
+  user asks for "today's report", "status report", "what shipped today", "summarize
+  today's commits/work", or invokes /status-report. Default source is git history
+  (the user's own commits); `/status-report from file` reads `DONE_TODAY.md` instead.
 ---
 
 # Status report
 
-A short, plain-English summary of what actually landed in git, for someone who
-wasn't in the room — a teammate, the client, future-you. Optimize for **brief and
-readable**, not complete. This is not a changelog and not a standup transcript.
+A short, plain-English summary for someone who wasn't in the room — a teammate, the
+client, future-you. **Brief and readable, not complete.** Not a changelog, not a
+standup transcript. Target ~60 seconds of reading: 4-6 bullets total.
 
-## Step 1 — gather the real commits, not conversation memory
+## Step 1 — pick the source from the argument
 
-Scope defaults to **today** across every repo under `repos/`. If the user names a
-person, date, or range, use that instead — don't assume "today" or "me" silently.
+**No argument (default): git history, the user's commits only.** Scope is **today**
+across every repo under `repos/`, unless the user names a date, range, or person.
 
 ```bash
 cd repos
+me=$(git config user.email)
 for d in */; do
   repo="${d%/}"
   [ -d "$repo/.git" ] || continue
-  commits=$(cd "$repo" && git log --since="<start>" --until="<end>" --oneline)
+  commits=$(cd "$repo" && git log --author="$me" --since="<start>" --until="<end>" --oneline)
   [ -n "$commits" ] && { echo "=== $repo ==="; echo "$commits"; }
 done
 ```
 
-Filter by author only if the user asks for "my" commits specifically **and** you can
-resolve their git identity (`git config user.email`) — otherwise report everyone's,
-since a solo-looking repo often has a Cursor/Claude co-author on every commit here.
-
-For each commit found, pull enough to summarize accurately — don't guess from the
-subject line alone:
+Read enough of each commit to summarize honestly — never guess from the subject line:
 
 ```bash
 git show --stat --format="%B" <sha> | head -15
 ```
 
-**Never include this conversation's own uncommitted edits or VPS deploys in the
-report unless the user explicitly says to.** A report about "today's commits" means
-committed git history — work still sitting in a working tree or shipped straight to
-a server without a commit doesn't count until the user says otherwise.
+Caveat to state if it matters: **every agent session on this box commits as the same
+identity**, so `--author` cannot separate the user's work from a concurrent session's.
+If the day looks suspiciously full, say the report covers this box's commits.
 
-## Step 2 — group by theme, not by repo or chronology
+Do **not** include uncommitted working-tree edits or server deploys in default mode.
 
-Read every commit message + diff stat, then cluster them into 3-6 themes that would
-make sense to someone skimming (e.g. "read-path performance", "media engine
-consolidation", "admin moderation tools") — a theme can span several repos in one
-bullet; don't give each repo its own section. Drop pure noise (typo fixes, doc
-formatting) unless nothing else happened that day.
+**`from file` (or "from done_today", "use the file"): read the repo-root
+`DONE_TODAY.md` and report only from it.** Don't pull, don't read git, don't verify
+against repos — the file is the source of truth for that run. It records deploys and
+uncommitted work too, and in this mode those belong in the report.
 
-## Step 3 — write it in this exact shape
+If a `from file` run finds no `DONE_TODAY.md`, say so and offer the git default.
 
-```
-Today's work — <2-4 word theme> (<date>)
+## Step 2 — group by theme, then attribute to repos
 
-<One sentence: the throughline connecting the day's work.>
+Cluster into 4-6 themes a skimmer would recognize. One bullet per theme, even if it
+took eight commits across three repos. Drop noise (typos, doc formatting) unless
+nothing else happened.
 
-Shipped & live (<comma-separated repos involved>):
-- <theme bullet: what changed + why it matters, one line, no jargon dump>
-- <theme bullet>
-- <theme bullet — 3-6 total, not one per commit>
+Each bullet **opens with the repos it landed in**, in backticks, then an em dash,
+then the plain-English what-and-why. Non-repo surfaces get a plain name (`VPS
+scraper service`, `workspace tooling`).
 
-In progress:
-- <what's being built next, in plain English, if the user has given you that
-  context — see Step 4. Omit this section entirely if there's nothing in flight.>
-```
+## Step 3 — write it in this shape
 
-Rules that keep it brief and honest:
-- **One line per theme, not per commit.** Multiple commits implementing one feature
-  become one bullet.
-- **Say what changed and why it matters**, not the mechanism. "Cut ~1.7s off a 2.8s
-  search response" beats "removed a synchronous socket call."
-- **No commit hashes, no file paths, no code** in the report itself — this is for a
-  human skimming, not a diff review.
-- **Name real numbers when a commit message has them** (a measured ms/percent
-  improvement, a row count) — don't invent one if the commit doesn't say.
-- Co-author trailers (`Cursor`, `Claude ...`) are provenance, not content — never
-  surface them in the report.
-
-## Step 4 — in-progress work
-
-Only comes from what the **user tells you directly** in the request (a plan, a
-description of what's being built next) — never infer or guess at unlanded work
-from partial diffs or branch names. If the user describes upcoming work in
-conversational detail, compress it to ONE bullet: what it does, the key mechanism
-if it's non-obvious (e.g. a fallback ladder, a stopping condition), and why it
-exists — cut everything else. If they give you nothing, omit the section.
-
-## Worked example
-
-Input: today's commits across `xwapi`, `xwaction`, `xwbase`, `mawtarx`, `mawtarx-api`,
-`markibx`, `markibx-api`, `kara-api` (WS-RPC surface, a media engine consolidation +
-DNS perf fix, catalog wiring, autocomplete vocab sync, admin moderation routes) plus
-a user-supplied description of an upcoming `/search/similar` endpoint.
+Print it as chat prose — **not fenced in a code block** — so the markdown renders.
 
 ```
-Today's work — karaa/mawtarx catalog, media, and platform-surface publishing (2026-07-15)
+Today's work — <3-6 word theme> (<date>)
 
-Theme: publishing shared xwapi/xwbase/xwaction surface that products depend on, plus
-catalog wiring, a media engine consolidation, and admin moderation tools.
+<One sentence: the throughline. No preamble.>
 
-Shipped & live (xwapi, xwaction, xwbase, mawtarx, mawtarx-api, markibx, markibx-api, kara-api):
-- Published xwapi's WS-RPC surface (transport-agnostic dispatcher, WS client, HTTP
-  re-exports) — fixes import crashes that were breaking deploys on products expecting
-  these symbols.
-- New xwbase media engine: inline data-URI photo bounding/thumbnailing, plus a DNS
-  perf fix at thumbnail-signing time (cut ~1.7s off a 2.8s search response by dropping
-  a redundant per-card DNS lookup). mawtarx-api and kara-api now wire through the
-  shared engine instead of their own copies.
-- Catalog: mawtarx gained a market_catalog module, markibx's store gained catalog
-  helpers, both -api services mounted the new routes.
-- Autocomplete: mawtarx-api now exposes its full vocab; kara-api pulls + backs it up
-  so /autocomplete still works if mawtarx is offline.
-- Admin moderation (kara-api): soft/hard delete + restore + mark-sold for listings,
-  JWT-gated ad reporting with a resolve flow.
+**Shipped & live:**
 
-In progress:
-- GET /search/similar: a fallback-ladder endpoint (make+model -> drop trim/year ->
-  same make+body-type -> same body-type+price band, stopping at 3 matches) so the
-  Estimate flow can show similar cars for a typed make/model/year rather than a
-  listing id - returns a match_level for the UI, and retires the dead
-  year_min/year_max frontend<->backend mismatch by giving year logic one owner.
+- `repo`, `repo` — what changed and why it matters, with the real numbers. Trade-offs
+  stated in the same bullet, not softened.
+- ...
+
+**In progress:**
+
+- `repo` (+ `dep-repo`) — what's being built, the one non-obvious mechanism, why.
+```
+
+Rules that keep it short and honest:
+
+- **One line per theme, not per commit.** 2-4 lines max per bullet.
+- **What changed and why it matters**, not the mechanism. "Cut ~1.7s off a 2.8s
+  search" beats "removed a synchronous socket call."
+- **Never name plans, issue numbers, tickets, ADRs, branch names, or slice IDs.** The
+  reader has no repo access — "ran the #38 plan" tells them nothing. Say what the work
+  did.
+- **No commit hashes, no file paths, no code, no symbol names.**
+- **Real numbers only** — quote them when the source has them, never invent one.
+- **Keep the honest bad news.** A regression, a dip, a thing that didn't work is part
+  of the report, in the same bullet as the win.
+- Co-author trailers (`Cursor`, `Claude …`) are provenance — never surface them.
+
+## Step 4 — the In progress section
+
+In `from file` mode it comes from the file's own unfinished/left-open items — one
+bullet each for the two or three that a reader would care about, not the whole list.
+In git mode it comes only from what the **user tells you directly**; never infer
+unlanded work from partial diffs or branch names. Omit the section if there's nothing.
+
+## Worked example (`from file`)
+
+```
+Today's work — car-data soundness, safer scraping, fewer collisions (2026-08-03)
+
+Several things that looked correct turned out measurably wrong, and got fixed with
+numbers attached.
+
+**Shipped & live:**
+
+- `markibx`, `markibx-connect`, `mawtarx` — rebuilt the car catalog's generation
+  structure: found why most generations were fake shells, retired 13 catch-alls for 55
+  real generations, +54 makes / +1,392 models, unmatched makes 5.3% → 0.14%, dev
+  listings 87.2% linked. Overall match dipped 66% → 62% — the old number leaned on
+  those catch-alls.
+- `mawtarx-connect`, `mawtarx-api`, `kara-api` — closed a data-integrity hole: a
+  "demo" scraper test could make the live scraper fabricate fake cars into the real
+  store, stuck on until restart. Now per-request.
+- `VPS scraper service` — the scraper had been running a 5-week-old catalog library
+  under an identical version number (weeks of stale vocabulary). Fixed, verified live.
+
+**In progress:**
+
+- `mawtarx-connect` (+ `xwsystem`, `xwapi`) — Kuwait next: stress-testing killed three
+  assumptions, including the real blocker — one writer rejecting work under load, so
+  parallel scraping would fail outright. Two shared-library pieces first, then a
+  two-step rollout.
+- `xwsystem` + workspace tooling — leases so 5+ concurrent agent sessions stop
+  overwriting each other in one checkout; built, 95 tests green, not switched on.
 ```
 
 ## Output
 
-Print the report directly in the response — plain text, no artifact, no file
-written, unless the user asks you to save or publish it somewhere.
+Print the report directly in the response as rendered markdown — no code fence, no
+artifact, no file written, unless the user asks to save or publish it.

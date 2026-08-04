@@ -236,6 +236,11 @@ Two consequences:
   2-minute window: align to just after a watchdog tick (they fire at even-minute
   `:09`) and finish well under 120 s — e.g. the mawtarx renormalize backfill
   opens the store in `batch` durability so it's one ~20 s write, not per-row.
+  (2026-08-03: a 2m05 relink overran the window and the restart dropped ~900
+  links — chase any long op with a no-`--relink` top-up. A maintenance-flag
+  patch that lets `touch /var/tmp/xw-maintenance-<svc>` pause the watchdog ≤15
+  min is committed in markibx-api 3596357 but awaits root install —
+  markibx-api#2 / `ROOT_ASKS.md`; until it lands, the window rule above stands.)
   This watchdog is a *systemd* restarter and is SEPARATE from the step-0 deploy
   lock, which guards against *other agent sessions*; you need both.
 
@@ -252,9 +257,19 @@ tar -xzf /tmp/<repo>-src.tar.gz -C /tmp/<repo>-deploy
 
 No `sudo` needed — `shukri` carries a direct ACL on these venv dirs (confirmed on
 `/opt/mawtarx-api/.venv`; `Permission denied` on one that hasn't been granted yet is
-a real gap to raise, not something `sudo` can route around here). Use the service
+a real gap to raise, not something `sudo` can route around here — `/opt/kara-api/.venv`
+is partly root-owned, see `ROOT_ASKS.md`). Use the service
 map above to get `<correct-venv>` right — this is where the `/opt/kara-api` vs
 `/opt/karaa-api` mistake happens.
+
+⚠️ `--force-reinstall` (and `pip uninstall`) only touch files in the dist's RECORD —
+files ever hand-copied into a venv survive both and keep shadowing the shipped package
+(2026-08-03: both venvs served 13 retired markibx gen files, registry 5,270 vs seed
+5,257). When a venv may carry hand-copied history, use the clean-reinstall wrapper
+instead: `~shukri/bin/xw-venv-reinstall <venv> <dist> <pkg-relpath> <wheel>`
+(source: markibx-api `scripts/vps-markibx-mawtarx-deploy/xw-venv-reinstall.sh` —
+uninstall + purge the import dir + wheel install). Verify after any suspect deploy by
+comparing an installed-artifact count against the source of truth (e.g. gen count).
 
 ### 4. Pre-restart sanity check — import it before you restart it
 

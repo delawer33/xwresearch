@@ -85,6 +85,11 @@ TLS-terminated public domains, from `/etc/caddy/Caddyfile`:
   route (incl. `/health`) 302s to `/_gate/login?site=markibx` (verified 2026-07-30; this
   reverses the earlier "public" note). So verify markibx deploys over **loopback on the box**
   (`curl http://127.0.0.1:8242/...`), not the public domain.
+- **Gate passwords for `site=mawtarx` and `site=markibx` were (re)created and verified working
+  2026-08-04** (per the box owner) — both logins succeed. The gate is a single shared
+  access-password per site (`POST /_gate/login?site=<site>`, form fields `password` + `next`);
+  it is NOT an app-level identity, so `require_admin` API routes can still 403 behind it. The
+  passwords themselves are a secret — they are not stored in this repo.
 
 ## Config wiring (env files)
 
@@ -120,13 +125,24 @@ Non-secret keys that define how the pieces talk (from `/etc/<svc>.env`):
 ## Access — sudo is scoped, not passwordless
 
 `shukri`'s sudo is limited to three NOPASSWD wrappers (`sudo -l` is the source of truth,
-re-check before trusting this — verified 2026-07-21): `xw-backend-ctl`
+re-check before trusting this — wrapper set verified 2026-07-21, `xw-backend-setup`
+subcommands widened 2026-08-04): `xw-backend-ctl`
 (start/stop/restart/status on the six units above plus any `karaa-*`/`markibx-*`/`mawtarx-*`
 unit), `xw-backend-logs` (a `journalctl -u <unit> [args...]` wrapper), and `xw-backend-setup`
-— which only **bootstraps new** services (`ensure-user <name>`, `install-env <name> <src>`,
+— which bootstraps new services (`ensure-user <name>`, `install-env <name> <src>`,
 `install-unit <src>`, `daemon-reload`, `enable|start|stop|restart|status <unit>`; names must
-start with `karaa-`/`markibx-`/`mawtarx-`). Plain `sudo cat`, `sudo -u <user>`, or any other
-`sudo <cmd>` fails (password required, none set).
+start with `karaa-`/`markibx-`/`mawtarx-`) **and now also runs two scoped admin ops on
+existing services** (added 2026-08-04, per the box owner):
+
+- `xw-backend-setup admin-post <unit> <api-path> <json>` — POST to an admin API route on a
+  running service, as that service. This is the **reconcile** path: it lets `shukri` arm
+  reconcile without touching the root-600 env file. Preferred invocation:
+  `sudo xw-backend-setup admin-post mawtarx-api /api/mawtarx/v1/admin/reconcile '{"enabled":true,"acknowledge_drop":true}'`.
+- `xw-backend-setup check-mawtarx-token <unit>` — verify a service's mawtarx service token
+  (Karaa↔Mawtarx wiring): `sudo xw-backend-setup check-mawtarx-token karaa-api`.
+
+Plain `sudo cat`, `sudo -u <user>`, or any other `sudo <cmd>` still fails (password required,
+none set). SSH access for `shukri` is active (confirmed 2026-08-04).
 
 `ensure-user <name>` also grants `shukri` a default ACL (`rwx`, inherited by new files) on the
 new `/var/lib/<name>` — confirmed via `getfacl`. The same ACL pattern already existed on at
@@ -141,8 +157,11 @@ run `~shukri/xw-access-preflight` on the box for the live GRANTED/BLOCKED pictur
 - **No read or safe-incremental-write path for an *existing* service's env file** (e.g.
   `/etc/mawtarx-api.env`). `install-env` only *replaces* a file wholesale and is scoped to new
   services; no wrapper can `cat` one, and `/proc/<pid>/environ` is unreadable to `shukri`.
-  Changing one var needs a human with real root — don't blind-overwrite guessing at contents.
-  (This is what blocked enabling `MAWTARX_RECONCILE_ENABLED` on 2026-07-29.)
+  Changing an arbitrary var still needs a human with real root — don't blind-overwrite guessing
+  at contents. **Reconcile is the exception and is no longer blocked**: it is armed at runtime
+  through the admin API via `sudo xw-backend-setup admin-post` (see Access above), not by editing
+  `MAWTARX_RECONCILE_ENABLED`. (That env var blocked reconcile from 2026-07-29 until the
+  `admin-post` wrapper landed 2026-08-04.)
 - **No `mask`/`unmask`.** `xw-backend-ctl` allows start/stop/restart/… but not `mask`, and the
   `xw-service-watchdog@<svc>.timer` (below) is outside its unit allowlist — so you cannot keep a
   unit down. Any offline op (e.g. a store backfill) must finish inside the ~2-min watchdog
@@ -185,8 +204,11 @@ not to the federated total the homepage serves.
   `sudo xw-backend-logs mawtarx-scraper-runner`). Latest full sweeps that day: saudisale ~4.7k,
   syarah ~3.9k, opensooq ~2.7k, sayarat ~2.3k, samaco 64. mawtarx holds **~19k active listings**
   (incl. 5.1k legacy dubizzle NOT in the sweep set). The runner logs `reconcile=True`, but that
-  is only the *runner-side request* — the destructive act is server-side gated by
-  `MAWTARX_RECONCILE_ENABLED` (root-600, unverifiable), so this is not proof reconcile is armed.
+  is only the *runner-side request* — the destructive act is server-side gated. As of 2026-08-04
+  that server-side gate can be **armed by `shukri`** via
+  `sudo xw-backend-setup admin-post mawtarx-api /api/mawtarx/v1/admin/reconcile '{"enabled":true,"acknowledge_drop":true}'`
+  (no longer requires editing the root-600 `MAWTARX_RECONCILE_ENABLED`). Confirm it took, then
+  watch the next full sweep: reconcile only fires on a complete, non-truncated `full` sweep.
 - **It's a service, not a cron/timer** — `/etc/cron.d` holds only `e2scrub_all` +
   `exonware-security`, so a cron check finds nothing and mis-reads as "no scraping." The old
   Postgres `collect.py`/`daemon.py` path was deleted 2026-07-19; the runner
