@@ -194,3 +194,62 @@ Consequence for the merge: `buyer_store()` is still an O(N) copy but far cheaper
 decorator becomes a **silent no-op that looks configured**. Fixed via
 `serialize=MODEL_CACHE_SERIALIZE`; `tests/test_response_cache_hits.py` now asserts a real hit,
 because nothing else in the suite would notice.
+
+## Four parallel agents on mawtarx — three landed, one thrown away
+
+Ran four subagents in git worktrees against the mawtarx family. Reviewed each myself rather than
+trusting its own green; two of the four had defects that only showed up under review.
+
+**Pushed:**
+
+- **mawtarx-connect#15 + #16 — sweep truncation honesty** (`mawtarx-connect c421be0`, `xwapi 9927c6df`).
+  New `ScrapeTelemetry` in `xwapi.scrapping` (fetch/parse error counts, `window_exhausted`,
+  `record_cap_hit`) and one `sweep_outcome.truncation_reason()` used by both `runner.py` and
+  `reconcile_gate.py`. 416 passed/1 skipped (was 399/1); xwapi scrapping 22 passed.
+- **mawtarx-connect#6 — native-market-only estimation** (`mawtarx e0c3cb7`). New `market_policy.py`;
+  `cross = [] if policy.native_only else [...]` in `estimate()`. **Pricing 7 → 8.** ADR placement
+  deviated (the ADR's `pricing_methods/` home is a hard import cycle) — noted in the ADR.
+- **mawtarx-connect#7 — FX staleness gate + KWD re-sourced** (same merge). 12.191250 → 12.207031 SAR.
+  444 passed in mawtarx overall.
+
+**Two review catches worth keeping:**
+
+1. `sweep_outcome` read its signals with `getattr(result, "fetch_errors", 0)`. Those fields exist
+   only in the new xwapi, so against an old one the guard returned "not truncated" — **failing OPEN
+   in exactly the deploy skew it exists to survive**, and the runner's venv
+   (`/opt/mawtarx-connect-api/.venv`) is deployed independently of mawtarx-api's. Now fails CLOSED,
+   checked at import against `ScrapeResult.__dataclass_fields__` and again per call.
+2. The agent called `haraj`/`motory` "the exact input that marks live ads SOLD". Overstated —
+   `reconcile_safety.should_skip_reconcile` already returns True for `raw_count <= 0`. The honesty
+   defect is real; the destructive consequence was caught a layer down.
+
+**Discarded — a whole agent's work:** the `auth_policy_store` blocker fix. While the agent wrote it,
+another session pushed the same module (`a88d08f`, `b0fa1e0`); `origin/main` was 6 commits ahead by
+push time. Local main reset to origin, branch `feat/auth-policy-store` (`eabfde8`) abandoned. **The
+blocker is fixed upstream** — both API `security.py` modules import. Lesson: `/pull-repos` at session
+start is not enough; re-fetch before pushing.
+
+**Measured, and it corrects the record:** UAE pricing does not work at corpus scale. Of 443 AE rows
+sampled live, **86% price `unavailable`**, median confidence **0**, and only **1.8%** yield a real
+deal verdict — against Saudi's 58%. Yesterday's "UAE activated" proved the *pipeline*, not the
+*product*. This is also why flagging AE `native_only=ON` is safe: it removes almost nothing that works.
+
+Diagnosed via the new counters: `haraj` is never contacted (`KARAA_ENABLE_HARAJ` unset) and `motory`
+has no scraper at all (`connector_type=DISABLED`) — yet **both carry `measured: True` FULL profiles**
+in `sweep_profiles._DEFAULTS`. Two of the eight Saudi sources in the prod sweep table are fiction.
+`kavak.ae`/`uaecarmarket.ae`/`arabwheels.ae` fetch and persist cleanly, so their prod shortfall is
+downstream (ingest, dedup, or not being swept) — probed from a dev IP, so not conclusive for the VPS.
+
+**NOT DEPLOYED.** `pip install` into `/opt/*/.venv` over ssh is refused by the auto-mode classifier.
+Everything up to it succeeded: deploy lock taken and released, local build-tests green for all three
+packages, bundles extracted to `/tmp/*-deploy` on the box. **Nothing was installed; server untouched.**
+Order when someone with the permission runs it: **xwapi first, then mawtarx-connect** (matched pair —
+the connect venv's `ScrapeResult` has zero telemetry fields today, and the guard fails closed), then
+mawtarx core **alone** (pricing 7 → 8 reflows the corpus on restart).
+
+Issues #6/#7/#15/#16 left **open** with status comments — not closing work that isn't live.
+
+**Pre-existing breakage proved, so nobody re-debugs it:** mawtarx-api's
+`test_batch_resolves_by_id_and_dedup_key` and `test_invalid_vin_returns_400` fail identically at
+`788ee55~1`; the VIN one asserts a `detail` key the xwaction error envelope no longer uses.
+xwauth-identity's 2 collection errors are `exonware.xwauth_id_api`, a repo absent from this checkout.
