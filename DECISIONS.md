@@ -38,8 +38,8 @@ promotes on one assertion — the client refuses it), and **the ask is restricte
 market-invariant fields** (mpg/CO₂ are outputs of a regulator's test cycle, so staging them in the
 `global` layer would assert EPA's cycle as universal).
 
-Code: markibx `1d245c6`, markibx-connect `8155438`. **Not yet deployed to the dev VPS** — the 10
-repaired generations still serve impossible triples there.
+Code: markibx `1d245c6`, markibx-connect `8155438`. **Deployed to the dev VPS 2026-08-04** (both
+venvs; verified via `/catalog/resolve` — `toyota:camry:xv50` no longer serves any mpg field).
 
 ## D-017 — concurrent agents: worktrees by default, scoped leases on the main checkout
 

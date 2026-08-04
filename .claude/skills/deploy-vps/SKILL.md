@@ -335,10 +335,13 @@ loopback on the box:
 curl -s https://<domain>/api/<prefix>/v1/health
 ```
 
-(`karaa.net`/`mawtarx.com` are gated by the xwauth-id site-gate via
-`forward_auth`; `markibx.com`'s `/api/*` routes are NOT gated at the Caddy
-level — the app gates its own console instead — so `curl` works there
-directly without a session.)
+⚠️ **All three domains are gated now** — `karaa.net`, `mawtarx.com` AND `markibx.com`
+route through the xwauth-id site-gate via `forward_auth`. markibx's `/api/*` was
+ungated for most of this project's history and this step used to say `curl` works
+there without a session; re-verified externally 2026-08-04, `markibx.com/api/markibx/v1/health`
+and `/catalog/resolve` both **302 → `/_gate/login`**. So step 6 cannot verify
+markibx from outside without a gate session: rely on the loopback checks in step 5,
+and read an external `302` as "gated", not as "deploy broken".
 
 ### 7. Check downstream dependents
 

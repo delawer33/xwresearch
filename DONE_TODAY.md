@@ -65,18 +65,17 @@ callers in two repos need it and the cascade runs core → connect. `fuel_econom
 
 ## Left open
 
-- **DEPLOY NOT DONE — the whole reason to care.** The install ssh call was blocked by this session's
-  command classifier. Both venvs (`/opt/markibx-api/.venv`, `/opt/mawtarx-api/.venv`) still carry
-  `combined_mpg` on `toyota:camry:xv50` and have no `fuel_economy.py`, i.e. **the dev box is still
-  serving the 10 impossible triples.** Everything is staged and pre-flight-probed on the box
-  (`/tmp/markibx-src.tar.gz`, `/tmp/markibx-connect-src.tar.gz`; all three apps import OK on both
-  venvs). It needs: `pip install` markibx into **both** venvs + markibx-connect into
-  `/opt/markibx-api/.venv` in ONE ssh call (2-min watchdog), then restart markibx-api,
-  markibx-connect-api, mawtarx-api. Deploy lock was acquired and released cleanly.
-- **markibx-connect#1 left OPEN**, deliberately — code is landed and pushed, but the seed repair
-  isn't live. My outcome comment could not be posted: `api.github.com` POSTs time out repeatedly
-  (reads and `git push` over HTTPS work fine). Comment text is saved at
-  `scratchpad/issue-comment.md` — post it when the network settles.
+- ~~DEPLOY NOT DONE~~ → **DEPLOYED + verified 15:12 +03** (the first install attempt was blocked by
+  the command classifier; retried on the owner's go and it went through). markibx core into **both**
+  `/opt/markibx-api/.venv` and `/opt/mawtarx-api/.venv`, markibx-connect into
+  `/opt/markibx-api/.venv`, all in one ssh call; markibx-api / markibx-connect-api / mawtarx-api
+  restarted, healthy, zero log errors. Verified on the changed data path:
+  `/catalog/resolve?make=Toyota&model=Camry&year=2014&market=US` returns `xv50` with **no mpg
+  fields** and `emissions_co2_g_km: 136.7` retained. Installed seed passes `--validate-seed`
+  including the new rule. Deploy lock acquired + released both times.
+- **markibx-connect#1 CLOSED** with the verified outcome comment. (`api.github.com` POSTs were
+  timing out for ~20 min — five failed attempts — then recovered; `git push` over HTTPS was
+  unaffected throughout.)
 - **The `--live` path has never reached a real endpoint** — no API key in this environment. Request
   construction, parsing, failure handling and the full pipeline are covered offline. A full sweep is
   1,623 × 3 = **4,869 API calls**; the driver prints that budget before doing anything.
@@ -86,3 +85,13 @@ callers in two repos need it and the cascade runs core → connect. `fuel_econom
 - `country_origin` is carried by 140 seed generations but is **absent from
   `car_spec.CAR_SPEC_FIELDS`**, so the depth client can't ask for it (the parse allowlist would drop
   it). Adding it to the schema is a separate additive change.
+- **`markibx.com/api/*` IS edge-gated now** — `/health` and `/catalog/resolve` both 302 to
+  `/_gate/login` (verified externally 2026-08-04). Two docs claim the opposite and are stale:
+  `ARCHITECTURE.md` ("markibx-web … **not** gated at the edge, unlike karaa/mawtarx") and the
+  `deploy-vps` skill's step 6 ("markibx.com's `/api/*` routes are NOT gated … so `curl` works there
+  directly without a session"). Fixed both. Consequence for deploys: markibx can only be verified
+  from inside the box (loopback) unless you hold a gate session.
+- **Don't verify karaa-api with concurrent curls.** My first downstream check used `diff <(curl …)
+  <(curl …)`, which fires both at once, saturates the single worker and returns empty bodies /
+  `http=000` — it read exactly like a broken proxy. Sequentially, karaa's `/catalog/stats` is
+  byte-identical to mawtarx's. Known single-worker saturation, now with a concrete repro.
