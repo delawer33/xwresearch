@@ -150,3 +150,43 @@ ahead) then merge, once that session releases.
   on the repo, so a worktree-local rebase queues behind unrelated section holders even though a
   worktree has its own index and HEAD. Worth narrowing; `XW_LEASE_OFF=1` is itself
   classifier-blocked, so there's no clean escape hatch today.
+
+## karaa-api#3 — event-loop starvation fixed, COMMITTED BUT NOT LANDED
+
+`repos/kara-api` worktree `.claude/worktrees/ka-3-event-loop`, branch
+`perf/unblock-event-loop`, commit **18f0e3b**. Not merged, not pushed, not deployed; **#3 left
+open**. Suite 175 pass; the 6 failures in `test_api.py::test_order_sensitive_suite_stays_stable`
++ `test_trim_catalog.py` are **proved pre-existing** (identical in a clean detached checkout at
+`13a9f8d`) — don't re-debug them.
+
+**Why it didn't land: local `main` is 20 commits behind origin** — the same trap the entry above
+records, twice in one day. A trial merge onto real `origin/main` leaves **2 conflicts**:
+`authorizer.py` (trivial — upstream's `ANALYTICS_SCOPES` vs my `logger`) and
+`routes/v1/sellers.py` (**not** mechanical: upstream's `get_seller` now does
+`await state.identity.get(...)` inside the handler, and my refactor moved that body into a sync
+function for `to_thread` — the resolution has to split the awaited identity lookup from the
+offloaded inventory scan). Resolving security-adjacent auth code blind at session end, then
+deploying it, is how the 2026-07-15 stale-deploy incident happened.
+
+**The two findings that outlived the issue text:**
+
+- **xwrouter awaits `route.fn(...)` inline** (`web.py:1576`) — unlike Starlette it does NOT hand
+  sync handlers to a threadpool. So on this engine a `def` handler blocks as hard as an
+  `async def` one, and the issue's suggested "or plain `def`" fix is wrong. `to_thread` is the
+  only fix that holds on either engine. **This applies to mawtarx-api and markibx-api too** (all
+  three are xwrouter) — unverified there, worth a sweep.
+- **legacy `routes/dealers.py` SHADOWS `routes/v1/dealers.py`** over HTTP, so #3's finding #4
+  named the unreachable copy. 7 shadowed endpoints now, not 5. Shadowed ≠ dead: the WS-RPC action
+  list is built from the same routers, so both copies need fixing.
+
+**Upstream `4f91bc0` (AlShehri, Aug 2) is complementary, not duplicate** — it removed the per-row
+re-pricing inside `filtered_store_view` (126s of sync CPU per request) but added no `to_thread`:
+it fixed the cost, not the blocking. It independently corroborates the single-worker diagnosis.
+Consequence for the merge: `buyer_store()` is still an O(N) copy but far cheaper than at
+`13a9f8d`, so my comments calling it "the expensive half" should be toned down on landing.
+
+**One defect the review caught in my own work:** `@cached_endpoint`'s default
+`serialize="xwjson"` cannot encode a pydantic model, so the library declines to store it and the
+decorator becomes a **silent no-op that looks configured**. Fixed via
+`serialize=MODEL_CACHE_SERIALIZE`; `tests/test_response_cache_hits.py` now asserts a real hit,
+because nothing else in the suite would notice.

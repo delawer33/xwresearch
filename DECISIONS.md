@@ -12,6 +12,26 @@ to a few lines — link the deep doc, don't inline it.
 
 ---
 
+## D-020 — on xwrouter, sync route handlers block the loop; `asyncio.to_thread` is the standard
+
+**2026-08-04 · karaa-api#3** — `xwrouter/web.py:1576` awaits `route.fn(**kwargs)` **inline**;
+`route.is_async` only decides whether to await the result. Unlike Starlette/FastAPI it never hands
+a sync handler to a threadpool, and all three product APIs (kara/mawtarx/markibx) run on xwrouter
+behind a single uvicorn worker. **So a `def` handler stalls the event loop exactly as hard as an
+`async def` one** — including `/health`, which is how the F2/F3 mirror deploy got rolled back
+(2026-07-14, 2.3s health check).
+
+Decided: whole-inventory or network-bound work in a handler goes in
+`await asyncio.to_thread(...)`, and the expensive expression is built **inside** the callable —
+`to_thread(fn, buyer_store(state))` evaluates `buyer_store(state)` on the loop. **Rejected:**
+"make it a plain `def`" (the fix that works on FastAPI and does nothing here — karaa-api#3's own
+fix list suggested it), and `--workers>1` (AppState holds process-local mutable state; that comes
+after those collections move into the store). `to_thread` buys loop *responsiveness*, not
+throughput — the GIL still serialises CPU-bound Python.
+
+Verified in kara-api only; **mawtarx-api and markibx-api are unswept.** Guard:
+`kara-api/tests/test_event_loop_blocking.py` (a shrink-only ratchet, async-only detection).
+
 ## D-019 — the native ABI binder is optional, and a rate limit that can't be evaluated denies
 
 **2026-08-04 · xwaction#1 · `c33f379`** — Two calls in the platform base that a future agent
