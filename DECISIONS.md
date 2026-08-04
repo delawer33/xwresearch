@@ -12,6 +12,35 @@ to a few lines — link the deep doc, don't inline it.
 
 ---
 
+## D-018 — cross-field car physics lives in the markibx core, and the depth engine got its driver
+
+**2026-08-04 · markibx-connect#1** — Two calls a future agent would otherwise reverse.
+
+**1. The fuel-economy coherence rule belongs to the core, not to the ingest that had the bug.**
+`combined` is a 55/45 blend of city/highway, so it must lie BETWEEN them — a *cross-field* rule
+that no per-field validator (`car_spec`, `PlausibilityValidator`, `fact_merger`'s tier guard) can
+express. Two callers in two repos need it: the EPA harvest (markibx-connect) and the ADR 0010 LLM
+promotion path (markibx). Putting it in the ingest would mean either duplicating the physics or
+letting the LLM path promote what the ingest refuses, and the layer cascade runs core → connect.
+Home: `markibx/fuel_economy.py`, enforced in the seed gate (4th soundness rule), in
+`PromotionWriter.promote` (refuses, `blocked`), and by the EPA aggregation. **Rejected: the
+`city ≤ combined ≤ highway` form the issue specified** — that ordering is a combustion habit, and
+an EV's city MPGe is legitimately the highest of the three; measured on the seed it flags 46 rows
+of which only 10 are broken, so it would have withdrawn 36 correct electric generations.
+Repo-local detail: markibx ADR 0014.
+
+**2. The ADR 0010 depth engine is runnable, which updates D-016's "built but not run" note.** Its
+missing `ILlmClient` + entry point now live in markibx-connect (`llm_depth.py`,
+`scripts/run_depth_extraction.py`). Still **not run at scale** — a full sweep is 1,623 × 3 = 4,869
+API calls and needs `$MARKIBX_LLM_API_KEY`. Two constraints that are decisions, not details:
+**temperature must be > 0** (0 makes N "independent" samples identical, so self-consistency
+promotes on one assertion — the client refuses it), and **the ask is restricted to
+market-invariant fields** (mpg/CO₂ are outputs of a regulator's test cycle, so staging them in the
+`global` layer would assert EPA's cycle as universal).
+
+Code: markibx `1d245c6`, markibx-connect `8155438`. **Not yet deployed to the dev VPS** — the 10
+repaired generations still serve impossible triples there.
+
 ## D-017 — concurrent agents: worktrees by default, scoped leases on the main checkout
 
 **2026-08-03 · repo-lease system** — 5+ sessions run against `repos/*` at once, and two agents in one
