@@ -95,3 +95,58 @@ callers in two repos need it and the cascade runs core → connect. `fuel_econom
   <(curl …)`, which fires both at once, saturates the single worker and returns empty bodies /
   `http=000` — it read exactly like a broken proxy. Sequentially, karaa's `/catalog/stats` is
   byte-identical to mawtarx's. Known single-worker saturation, now with a concrete repro.
+
+## xwaction#1 — the platform base wasn't importable, and its rate limits didn't run
+
+Closed as implemented in xwaction `c33f379` (`main` `326971c..c33f379`). All three findings in the
+issue reproduced first; one of its claims turned out to be branch-specific.
+
+- **`import exonware.xwaction` died on any clean install.** `backends/native.py` imported
+  `xwport_abi.binder` unconditionally, reached from `__init__` via `triggers` → `backends.ops`, and
+  **no `exonware-xwport-abi` distribution exists on any index.** The workspace only ever worked
+  because `repos/.venv` carries a stub copied out of `xwmemory/docker/xwport_abi_stub` — which is
+  also why `task ci:local`, building from clean clones, could never be honest here. Guarded import
+  + `_BINDER_AVAILABLE` sentinel; the no-binder path returns what the stack already handled
+  (`discover_cores()` → `[]`, `ops._lib()` → `None`).
+- **The dep moved to a `native` extra, partly reversing `ebac374`.** Declaring it instead of
+  bootstrapping `sys.path` was the right shape; as a *hard* dependency it makes the package
+  uninstallable. The `sys.path` bootstrap is not reinstated. Root **D-019**.
+- **Rate limiting now fails closed.** It was gated behind `security_config` (so `rate_limit=` alone
+  never ran) *and* the decision itself returned `True` whenever no compiled core was built — the
+  normal install. New `rate_limit.py` is a deliberate pure-Python parity copy of the Rust
+  `rate_limit_check_op`; an unparseable limit denies. **The repo's own
+  `test_security_rate_limit_fixed_window` was RED on a clean tree** and is green now — the bug was
+  sitting in the suite, unread.
+
+**What this deliberately did NOT fix, and it's the part that matters for production.**
+`core/execution.py::_execute_handlers` returns `True` unless the action passes `handlers=[...]`
+explicitly, and `handlers=` appears **zero times** across xwauth-identity, kara-api, mawtarx-api and
+markibx-api. So `SecurityActionHandler` never runs, and **xwauth-identity's 47 `rate_limit=`
+declarations on live auth endpoints** (`30/hour` anonymous sign-in, `10/hour` webhooks, `100/hour`
+admin) remain decorative. Flipping that changes live request outcomes and needs its own decision, so
+it wasn't bundled in. **Issue not filed — `gh issue create` was classifier-blocked after two TLS
+timeouts; the full write-up is at
+`/tmp/claude-1000/…/cbcb4442-…/scratchpad/issue-handlers.md`** — file it before the path is reaped.
+Also note the counter store is a per-process dict, so a multi-worker service allows N× the limit.
+
+**Unlanded:** the xwapi companion is **pushed as a branch, not merged** —
+`fix/xwaction-1-loud-action-registration` (`5792a777`) makes `create_app` **raise** when actions
+were requested but xwaction can't register them (it caught the ImportError and `pass`ed, returning a
+healthy-looking app serving nothing, with no log above `debug`). Upstream hasn't touched
+`facade.py`, so it merges clean; it isn't on `main` because session `83c9d971` holds section leases
+on `scrapping/` in that checkout (they're on xwapi#1, the per-host-group limiter). Merge:
+`git -C repos/xwapi merge --ff-only` won't do — rebase onto `origin/main` (5 email/smtp commits
+ahead) then merge, once that session releases.
+
+**Two process notes worth keeping:**
+
+- **My branches were based on a stale local `main`.** Both repos' local `main` sat behind origin
+  (xwaction 6 commits, xwapi 5) because the session opened with an explicit "don't pull". The
+  rebase mattered: real `origin/main` **did** carry the hard `xwport-abi` dependency the issue
+  cited, while the stale local main didn't — I'd written "already absent from main" into a commit
+  message that was wrong until I amended it. Branch off `origin/<branch>`, not a local ref you
+  haven't fetched.
+- **The lease hook blocks `git rebase` inside a worktree**, not just in the main checkout — it keys
+  on the repo, so a worktree-local rebase queues behind unrelated section holders even though a
+  worktree has its own index and HEAD. Worth narrowing; `XW_LEASE_OFF=1` is itself
+  classifier-blocked, so there's no clean escape hatch today.

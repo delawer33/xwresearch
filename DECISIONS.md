@@ -12,6 +12,32 @@ to a few lines — link the deep doc, don't inline it.
 
 ---
 
+## D-019 — the native ABI binder is optional, and a rate limit that can't be evaluated denies
+
+**2026-08-04 · xwaction#1 · `c33f379`** — Two calls in the platform base that a future agent
+could reasonably reverse.
+
+**1. `exonware-xwport-abi` is an extra, not a dependency.** `backends/native.py` imported it
+unconditionally, and that import is reached from `xwaction/__init__`, so a clean install could
+not `import exonware.xwaction` at all — nothing published under that name exists on any index.
+The workspace only worked because `repos/.venv` carries a stub copied out of
+`xwmemory/docker/xwport_abi_stub`, which is also why `task ci:local` could never be honest. This
+**partly reverses `ebac374`** ("declare exonware-xwport-abi instead of bootstrapping sys.path"):
+declaring it was the right shape, but as a hard dependency it makes the package uninstallable,
+so it waits in a `native` extra until the distribution exists. The `sys.path` bootstrap that
+commit removed is **not** reinstated. Guarded import + `_BINDER_AVAILABLE` sentinel; the no-core
+path was already supported everywhere downstream (`ops._lib()` → `None`).
+
+**2. Rate limiting fails CLOSED, and the decision rule now exists twice on purpose.** The native
+`rate_limit_check` op returns `None` with no compiled core — the normal install — and the handler
+logged a warning and allowed the request, so every configured limit was unenforced while reading
+as limited. `xwaction/rate_limit.py` is a deliberate pure-Python **parity copy** of
+`core/rust/.../profile.rs::rate_limit_check_op` (same unit table, same
+`now - window_start >= window_seconds` roll-over, same output keys); an unparseable limit string
+raises and denies. Accepted cost: two implementations that must be kept in step — the alternative
+was a security control that silently doesn't run. **Does not** make production limits work: see
+the follow-up finding that `SecurityActionHandler` is never selected at all.
+
 ## D-018 — cross-field car physics lives in the markibx core, and the depth engine got its driver
 
 **2026-08-04 · markibx-connect#1** — Two calls a future agent would otherwise reverse.
