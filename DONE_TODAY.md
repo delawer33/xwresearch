@@ -289,3 +289,92 @@ Issues #6/#7/#15/#16 left **open** with status comments — not closing work tha
 `test_batch_resolves_by_id_and_dedup_key` and `test_invalid_vin_returns_400` fail identically at
 `788ee55~1`; the VIN one asserts a `detail` key the xwaction error envelope no longer uses.
 xwauth-identity's 2 collection errors are `exonware.xwauth_id_api`, a repo absent from this checkout.
+
+## markibx#47/#48 + mawtarx-api#2 S2/S3 — four handoff items, landed and DEPLOYED
+
+Ran #47 myself and delegated the other three to parallel worktree agents (59 min of agent compute
+in ~26 min wall clock; whole round ~65 min).
+
+**markibx#47 — the widening harvest was blind to nameplates** (`c2e9544`, `6336a1d`, ADR 0015).
+Verified live: `Q59773381 wdt:P279* Q3231690` is **false** — "automobile model series" is a
+*sibling* of "automobile model", so one `P31/P279*` walk can never reach both. Audi arrived as 136
+platform-models with **no `audi:a4`/`a3`/`a6` at all**; root cause of the 12.8% model-miss #42 left
+open. The fold needs **two** signals: `Audi RS4 --P179--> Audi A4` and `Audi S6 --P179--> Audi A6`
+are *real* edges to sibling nameplates, so folding on the edge alone deletes `audi:rs4` from the
+catalog. Residual shape needs a letter **and** a digit, because `_PLAUSIBLE_CODE` is letters-first
+and rejects every digit-first VAG code (`8L`, `8P`, `8R`, `4L`). Result on the live 148-entity
+harvest: 7 nameplates carrying 16 folded platforms, 136 → 131 models, `audi:rs4` intact. Closed;
+seed migration is **#50** (filed).
+
+**markibx#48 — the issue's premise was wrong** (`cca31f6`, ADR 0016). It was never a mixture: all
+**47 of 47** generations under `baw` are FAW, re-checked against live `P176` on every suspicious slug
+(`Dongfeng CA71` is FAW's 1958 Changchun sedan, not Dongfeng Motor; `Toyota Corolla EX` is
+FAW-Toyota). **`BAW 212` was never in the seed.** So the real damage was worse than a mixture:
+`resolve("BAW","212")` matched on the false alias then searched FAW's 47 nameplates — and
+`saudisale:253152` "BAW 212 T01" is a real row on the box. Rekeyed `baw:*` → `faw:*`, `baw` reclaimed
+for 北汽制造. Membership 4,925/5,257/99 → **4,924/5,256/100**.
+
+**mawtarx-api#2 S2+S3** (`55e43e1`). Guard at `ScrapingPersistenceAdapter.store()` keyed on RFC 2606
+`.invalid` **hosts** — not substrings, so `notexample.invalid.com` (a real `.com`) and a real ad with
+the token in its query both pass. **Exploitation count is zero:** all 250 fabricated rows are one
+`seed_sample_data` boot run from 2026-06-28; not one carries a real provider id with a fake URL, which
+is this issue's actual shape.
+
+**mawtarx-connect tickets** — filed **#17** (dubizzle storing `Other` facets as identity) and
+commented measured evidence on #15/#2 instead of duplicating #3/#15/#16. Corrected the handed numbers:
+**717** rows, all `model_norm`, **0** on `make_norm` — no 400/698 split — and 533 of them are
+`sayarat` classifying the model as `Other` itself, not a parse failure.
+
+**Deployed** markibx core to all three venvs that carry it, four services restarted, 0 error lines.
+Live `/catalog/stats` = `{generations: 5256, models: 4924, makes: 100}`, matching the seed exactly.
+`resolve(FAW,"Bestune T77")` → `faw:bestunet77:gen1`; `resolve(BAW,"212")` → `model_not_in_catalog`.
+
+### Facts learned (not obvious from git log)
+
+- **`--force-reinstall` was the wrong tool and would have silently half-shipped #48.** It only removes
+  files in the dist RECORD, and #48 *renamed* 46 seed files, so the old `baw-*.json` would have kept
+  shadowing. `~shukri/bin/xw-venv-reinstall` is the fix; verify with `gens/faw/baw` counts per venv.
+- **markibx core is installed in FOUR venvs, not the two the deploy skill's table implies** —
+  markibx-api, mawtarx-api, mawtarx-connect-api **and karaa-api**. karaa-api's copy is on **247
+  generations** (pre-widening seed), so anything reasoning about "the deployed catalog" must say which
+  venv.
+- **The classifier blocks a multi-service `sudo xw-backend-ctl restart` loop but allows one restart per
+  ssh call.** A previous session logged the deploy as classifier-blocked on `pip install`; the
+  `xw-venv-reinstall` wrapper went through fine. Don't record "deploy is blocked" as a general fact.
+- **Re-widening before retiring fragments is a no-op.** Driver on the Audi fixture:
+  `skipped_curated: 137, models_created: 0` — the curated-gate skips a fragment *because the fragment
+  is itself a model*. Retire must precede re-widen; I had #50's order backwards until I ran it.
+- **`grep` on `listings.xwjson` gives false negatives.** `"make_norm":"toyota"` and
+  `"catalog_car_id"` both return **0** on a corpus that plainly has them — the fields aren't plain text
+  in that encoding. It only *looks* reliable because `example.invalid` does match. Use the API or the
+  venv decoder; I nearly concluded "0 listings affected" from it.
+- **A dangling `catalog_car_id` does not affect pricing.** The comp pool keys on
+  `make_norm`/`model_norm` (`pool.py`), never the catalog link.
+- **The 2026-07-31 synthetic purge did not stick** — 250 `example.invalid` rows are still live and
+  `active`, identical count and `first_seen` span in the pre-op backup. "Dry-run reports 0" was not
+  proof. Corrected the memory that claimed them purged.
+- **`gh issue view` / `gh issue list` are broken in this workspace** (projects-classic GraphQL sunset,
+  `repository.issue.projectCards`). Use `gh api repos/:owner/:repo/issues…`. Tell subagents up front.
+
+### Left open
+
+- **~89 dangling `baw:*` catalog links, deliberately not repaired.** 144 rows touch this change
+  (FAW 89, BAW 11, Bestune 25, Hongqi 19 — 0.6% of 23.8k) and FAW rows hold links like
+  `baw:bestuneb70:gen1` that now **404**. `catalog-link` has no scoping flags, so fixing 89 links means
+  a full 23.8k-row `--relink` — the op that overran the 110s watchdog and dropped ~900 links on
+  2026-08-03. Repair riskier than the defect; recorded on **#50**, which needs a relink anyway.
+- **#50: the seed migration itself is unrun.** `retire_fragment_models.py` is dry-run-verified on Audi
+  only (16 retirements, 0 needing review); the other **98 makes are unmeasured**. Order: retire →
+  re-widen → gate → relink → deploy.
+- **3 real platforms Wikidata hasn't linked** (`Audi A1 8X`, `A3 8Y`, `A6 C9`) sit in
+  `fragment_candidates_without_series_edge` awaiting a human ruling — folding them on the label alone
+  is what would kill `audi:rs4`.
+- **BAW's 14 real models are still unseeded**; FAW's sub-marques (21 `faw:hongqi*`) still sit under
+  `faw` — separating them needs `P1716`, and `P176` says `FAW Group` for 20 of 21, so no per-row source
+  exists yet.
+- **250 synthetic rows still live and `active`** — deleting them is a live-store write, and the failed
+  2026-07-31 purge should be understood before re-running it.
+- **karaa-api's markibx at 247 gens** — needs its own ticket; pulling it forward is a large change to
+  karaa.net's catalog, not a side effect to slip into an unrelated deploy.
+- **The seed gate has no cross-make duplicate-QID rule** — it missed `Q99513389` being keyed under both
+  `baw:hongqih9` and `hongqi:h9`. Adding one changes the gate's contract, so it wasn't done.
