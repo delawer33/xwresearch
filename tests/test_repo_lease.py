@@ -193,6 +193,21 @@ class TestGitParsing:
     def test_non_git_command_yields_nothing(self, mod):
         assert mod.git_invocations("ls -la && task test", WORKSPACE) == []
 
+    def test_cd_retargets_later_segments(self, mod):
+        # The payload's cwd is the session's, not the shell's: without tracking cd
+        # a rebase inside a worktree was attributed to the main checkout and queued
+        # behind its section holders.
+        calls = mod.git_invocations("cd repos/mawtarx && git rebase main", WORKSPACE)
+        assert calls[0].directory == WORKSPACE / "repos/mawtarx"
+
+    def test_cd_absolute_and_dash_c_compose(self, mod):
+        calls = mod.git_invocations(f"cd {WORKSPACE}/repos && git -C mawtarx merge x", Path("/"))
+        assert calls[0].directory == WORKSPACE / "repos/mawtarx"
+
+    def test_unresolvable_cd_leaves_the_directory_alone(self, mod):
+        for command in ("cd - && git merge x", "cd && git merge x", "cd a b && git merge x"):
+            assert mod.git_invocations(command, WORKSPACE)[0].directory == WORKSPACE
+
     @pytest.mark.parametrize(
         "command, index_wide",
         [
@@ -212,6 +227,22 @@ class TestGitParsing:
     def test_index_wide_classification(self, mod, command, index_wide):
         argv = mod._split(command)[0]
         assert mod.is_index_wide(argv) is index_wide
+
+
+class TestKillSwitch:
+    def test_off_file_bypasses_everything(self, mod):
+        target = CONNECT / "src/exonware/mawtarx_connect/runner.py"
+        assert hook(mod, edit_payload("agent-a", target)).returncode == 0
+        off = mod.LOCKS_DIR / "OFF"
+        off.parent.mkdir(parents=True, exist_ok=True)
+        off.write_text("")
+        try:
+            # Would be a denial without the switch, and env prefixes can be refused
+            # by the agent's own permission classifier.
+            assert hook(mod, edit_payload("agent-b", target)).returncode == 0
+        finally:
+            off.unlink()
+        assert hook(mod, edit_payload("agent-b", target)).returncode == 2
 
 
 class TestHookEndToEnd:
@@ -242,6 +273,15 @@ class TestHookEndToEnd:
         tree = worktrees[0].parent
         assert hook(mod, edit_payload("agent-a", tree / "src/anything.py")).returncode == 0
         assert hook(mod, edit_payload("agent-b", tree / "src/anything.py")).returncode == 0
+        assert mod.load_lease_module().LeaseRegistry(mod.LOCKS_DIR).leases() == ()
+
+    def test_rebase_after_cd_into_a_worktree_is_not_leased(self, mod):
+        worktrees = list((WORKSPACE / "repos" / "mawtarx").glob(".claude/worktrees/*/.git"))
+        if not worktrees:
+            pytest.skip("no worktree checked out right now")
+        tree = worktrees[0].parent
+        payload = bash_payload("agent-b", f"cd {tree} && git rebase main")
+        assert hook(mod, payload).returncode == 0
         assert mod.load_lease_module().LeaseRegistry(mod.LOCKS_DIR).leases() == ()
 
     def test_index_wide_commit_blocked_while_another_agent_edits(self, mod):

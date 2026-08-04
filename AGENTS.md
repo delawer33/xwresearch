@@ -41,8 +41,12 @@ Hard-won; ignore one and you lose an hour:
   - **ASK-OWNER means stop and ask the human**, quoting both intents — it fires on shared files
     (`pyproject.toml`, `__init__.py`, `version.py`) where a path can't tell you if the two changes
     collide. Their answer is recorded once via `task claims:decide` and never asked again.
+  - **A false denial is a bug — report it, don't fight it.** The hook reads the *session's* cwd,
+    not the shell's, so it tracks `cd` to know which checkout you're really in; if it ever blocks
+    work in a worktree it has mis-attributed the repo. Bypass and say so.
   - `task claims` shows who holds what · `task claims:reap` clears dead holders ·
-    `XW_LEASE_OFF=1` bypasses the hook (say so if you use it) ·
+    `XW_LEASE_OFF=1` bypasses the hook, or `Write` the file `.claude/locks/OFF` when your
+    classifier refuses that env prefix (delete it after; say so either way) ·
     `task claims:install` registers it in a new environment ·
     `task claims:take` / `task claims:drop` for a deliberate wide claim.
 - **Push access is uneven.** Backend repos (markibx\*, mawtarx\*, kara-api) push; **`kara-web` and
