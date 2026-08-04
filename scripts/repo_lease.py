@@ -19,7 +19,9 @@ everything. What makes concurrent commits in one checkout safe is a pathspec:
 `git commit -- <my paths>` ignores whatever else is staged or dirty, so this
 hook refuses index-wide git commands while another agent holds a section.
 
-Outcomes are ALLOW / WAIT / DENY / ASK-OWNER. ASK-OWNER is for the genuinely
+Outcomes are ALLOW / WAIT / DENY / ASK-OWNER. WAIT applies only to a git-state
+lease, which lasts one command; a section lease is held until its session ends,
+so waiting on one would spend the timeout and deny anyway. ASK-OWNER is for the genuinely
 undecidable ones (shared files like pyproject.toml, where whether two edits
 collide depends on what they say); the owner's verdict is recorded in
 decisions.jsonl and never asked again.
@@ -638,11 +640,11 @@ class Hook:
             if verdict != "deny":
                 return ASK, self._ask_owner_text(resource, scope, others, target)
 
-        # A file-level scope means the literal same file: short, so waiting is
-        # sane. A directory-level scope means someone is working through a
-        # module -- that can take an hour, so don't stall.
-        if scope == str(target.relative_to(repo_root)) and self._wait_for(request):
-            return ALLOW, ""
+        # Deliberately no wait here, even for a same-file conflict. Waiting only
+        # pays when the holder is about to release, and a section lease is held
+        # until its session ends -- so polling would burn the timeout and then
+        # deny anyway, turning every collision into a minute of silence. Only VCS
+        # leases, which last one git command, are worth waiting on.
         now = time.time()
         holders = "\n  ".join(describe(lease, now) for lease in others)
         return DENY, (

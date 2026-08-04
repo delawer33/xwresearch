@@ -20,6 +20,7 @@ import os
 import shlex
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -369,6 +370,66 @@ class TestHookEndToEnd:
         assert len(mod.load_lease_module().LeaseRegistry(mod.LOCKS_DIR).leases()) == 1
         blocked = hook(mod, edit_payload("agent-b", target))
         assert blocked.returncode == 2
+
+    def test_session_rooted_inside_a_repo_with_a_relative_path(self, mod):
+        """
+        The colliding sessions are often rooted at `repos/<repo>`, where Edit
+        carries a repo-relative path. Failing to resolve it against cwd would make
+        the hook silently no-op for exactly those agents.
+        """
+        inside = CONNECT
+        first = hook(
+            mod,
+            {
+                "hook_event_name": "PreToolUse",
+                "session_id": "agent-a",
+                "cwd": str(inside),
+                "tool_name": "Edit",
+                "tool_input": {"file_path": "src/exonware/mawtarx_connect/runner.py"},
+            },
+        )
+        assert first.returncode == 0
+        second = hook(
+            mod,
+            {
+                "hook_event_name": "PreToolUse",
+                "session_id": "agent-b",
+                "cwd": str(inside),
+                "tool_name": "Edit",
+                "tool_input": {"file_path": "src/exonware/mawtarx_connect/adapters.py"},
+            },
+        )
+        assert second.returncode == 2, "a relative path must resolve to the same section"
+        assert "repos/mawtarx-connect" in second.stderr
+
+    def test_workspace_root_docs_do_not_block_each_other(self, mod):
+        """
+        Every session edits DONE_TODAY.md. If root files shared one scope, the
+        workspace repo would serialise all agents on its own bookkeeping.
+        """
+        assert hook(mod, edit_payload("agent-a", WORKSPACE / "DONE_TODAY.md")).returncode == 0
+        assert hook(mod, edit_payload("agent-b", WORKSPACE / "AGENTS.md")).returncode == 0
+        scopes = {
+            lease.scope for lease in mod.load_lease_module().LeaseRegistry(mod.LOCKS_DIR).leases()
+        }
+        assert scopes == {"DONE_TODAY.md", "AGENTS.md"}
+
+    def test_two_agents_on_the_same_root_doc_do_conflict(self, mod):
+        assert hook(mod, edit_payload("agent-a", WORKSPACE / "DONE_TODAY.md")).returncode == 0
+        assert hook(mod, edit_payload("agent-b", WORKSPACE / "DONE_TODAY.md")).returncode == 2
+
+    def test_a_section_conflict_denies_immediately_without_waiting(self, mod):
+        """
+        A section lease lives until its session ends, so polling for it would
+        just spend the whole timeout and deny anyway. Long XW_LEASE_WAIT here: if
+        the wait ever comes back, this test takes 30s instead of failing quietly.
+        """
+        target = CONNECT / "src/exonware/mawtarx_connect/runner.py"
+        assert hook(mod, edit_payload("agent-a", target)).returncode == 0
+        started = time.monotonic()
+        blocked = hook(mod, edit_payload("agent-b", target), env={"XW_LEASE_WAIT": "30"})
+        assert blocked.returncode == 2
+        assert time.monotonic() - started < 5, "must not poll a lease that outlives the turn"
 
     def test_paths_outside_the_workspace_are_ignored(self, mod, tmp_path):
         outside = tmp_path / "elsewhere.py"
