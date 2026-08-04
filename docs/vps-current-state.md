@@ -62,6 +62,15 @@ each (e.g. `karaa-api --host 127.0.0.1 --port 8132`;
 - `markibx-api` **and** `markibx-connect-api` share `/opt/markibx-api/.venv`. A
   markibx-core change is installed once but **both** services must be restarted.
 - `mawtarx-api` and `mawtarx-connect-api` do **not** share a venv.
+- **markibx core is installed in FOUR venvs**, so "the deployed catalog" is ambiguous unless you
+  name one (measured 2026-08-04): `/opt/markibx-api/.venv`, `/opt/mawtarx-api/.venv`,
+  `/opt/mawtarx-connect-api/.venv` all carry the current seed (5,256 generations), and
+  **`/opt/karaa-api/.venv` carries 247** — the pre-widening seed, ~20 releases stale. Ship a
+  markibx-core change to the first three; karaa-api is deliberately left behind, because bringing
+  it forward is a large behavioural change to karaa.net's catalog rather than a deploy side effect.
+  Count what's installed rather than trusting `pip show` (the version does not bump per change):
+  `python -c "import exonware.markibx as m,os;print(len(os.listdir(os.path.dirname(m.__file__)+'/data/spine_seed/generations')))"`
+- `exonware-mawtarx` is likewise in all four; `exonware-markibx-connect` only in `/opt/markibx-api/.venv`.
 - `/opt/kara-api/.venv` (note: **`kara`**, no second `a`) is a **legacy leftover**,
   not a running service — but it still holds `libxwjson_abi.so`, which markibx-api
   and markibx-connect-api reference via `XWJSON_ABI_LIB=/opt/kara-api/libxwjson_abi.so`.

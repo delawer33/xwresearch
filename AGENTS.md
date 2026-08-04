@@ -59,8 +59,15 @@ Hard-won; ignore one and you lose an hour:
   around root via `xw-backend-setup install-unit` (it would work — see the file's FYI — but it
   crosses the intended sudoers boundary; classifier blocks it anyway).
 - **Cap the caution; lead with the number.** Don't re-verify state already established (ship on the
-  prior green unless told to re-check), and state the concrete count, not the vision — "3,533 models but
-  ~0% depth (identity-only shells)", not "the universal catalog" — before endorsing a plan.
+  prior green unless told to re-check), and state the concrete count, not the vision — "4,924 models but
+  7% spec depth (mostly identity-only shells)", not "the universal catalog" — before endorsing a plan.
+- **`gh issue view` is broken here; use `gh api`.** It dies on
+  `GraphQL: Projects (classic) is being deprecated … (repository.issue.projectCards)` in every repo —
+  the gh build still requests a field GitHub removed, and no flag avoids it. REST works:
+  `gh api repos/:owner/:repo/issues/<n> --jq '.title,.state,.body'`, `…/issues?state=all&per_page=60`,
+  `-f title=… -f body="$(cat body.md)"` to create, `-X PATCH -f state=closed` to close. Every
+  GraphQL-backed `gh` command is suspect; `gh api` was reliable all session. Tell subagents up front or
+  each one re-pays the discovery.
 
 ---
 
@@ -172,6 +179,15 @@ skill does this, `/run-local-stack` brings up mawtarx-api + kara-api + kara-web 
 **A collection error is the environment, not your change** — `task doctor`, then `task venv`.
 Push-worthy work should also survive `task ci:local -- <repo>`, which rebuilds the workspace
 from clean clones in ~60s and so catches what only your local venv was making pass.
+
+**A zero is not a measurement until a known-positive control passes.** A query that finds nothing
+looks identical to a query that *cannot* find anything, and the second one silently reads as an
+all-clear. Measured 2026-08-04: `grep '"make_norm":"toyota"'` returns **0** against the live
+`listings.xwjson` — those fields aren't plain text in that encoding — so a `grep` for `baw:` links
+"proved" a migration was a no-op when 89 rows were in fact affected. `example.invalid` *does* match
+in the same file, which is exactly what made the method look trustworthy. So before believing any
+zero, run the same query for something you know is there; if that also returns zero, your instrument
+is broken, not the data. Use the API or the venv's decoder for store questions.
 
 **Performance claims need numbers and a scope.** The WS-RPC benchmark is the cautionary tale:
 "6–23× faster" was true for trivial payloads and *false* for 5 KB payloads and the real
