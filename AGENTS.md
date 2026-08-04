@@ -246,6 +246,7 @@ benchmarks, releases). When in doubt keep it project-local — promotion is chea
 |---|---|
 | `/create-connector` | Add or activate a marketplace scraper in `mawtarx-connect` |
 | `/deploy-vps` | Ship kara / mawtarx / markibx to the VPS, and verify it landed |
+| `/end-session` | Close out: merge+push, deploy if not live, close only genuinely-implemented issues, leave the record true |
 | `/run-local-stack` | Bring up mawtarx-api + kara-api + kara-web locally, wired, memory-capped |
 | `/status-report` | Human-readable summary of recent work across the ~30 repos |
 | `/sync-ecosystem-docs` | Reconcile shared docs after a session changed a cross-repo fact |
