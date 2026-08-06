@@ -12,6 +12,31 @@ to a few lines — link the deep doc, don't inline it.
 
 ---
 
+## D-023 — fabricate-only connectors self-declare `synthetic=True` and are barred from the sweep table
+
+**2026-08-06 · mawtarx-connect#8** — 14 adapters have no network code at all: their `fetch()`
+can only ever yield `generate_raw` rows. All 14 now `register_source(..., synthetic=True)`, the
+sweep-table build refuses any declared-synthetic source (code default *or* operator YAML), and
+**`motory` was deleted from prod `_DEFAULTS`**, where it had been sitting with `measured: True`
+— a daily "full sweep" that was a fiction, feeding invented rows in as priced comparables.
+
+**Why the declaration, and not a detector:** fabricated rows have *perfect* shape. Every
+instrument we have measures shape, so a generator scores as the **best** source in its country —
+the liveness probe reports OK at 100% field fill. Nothing downstream can tell an invented row
+from a real one, because the source id is real. The source's own declaration is the only signal
+that exists; the probe therefore returns `SYNTHETIC` **before** building an adapter.
+
+**Do not reverse by reading the registry.** A registered connector with a green probe is not
+evidence a source is real — that is exactly the failure mode this closes. A static scan test
+pins the fabricate-only set so a new one cannot arrive undeclared. Making one of these real means
+writing its fetcher, not deleting its flag.
+
+**Code:** `repos/mawtarx-connect/src/exonware/mawtarx_connect/connectors/registry.py`
+(`is_synthetic_source`), `sweep_profiles.py:264,389` (`SyntheticSweepSource` guard),
+`tests/test_synthetic_ban.py`, `docs/gcc-connector-field-notes.md`.
+
+---
+
 ## D-022 — LLM rate limiting stays on `xwapi.scrapping`; xwai does not get a limiter
 
 **2026-08-06 · markibx-connect#2** — the ticket's last acceptance criterion asked that

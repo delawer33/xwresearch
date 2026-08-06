@@ -178,3 +178,65 @@ alone is **not** enough — the provider factories live in **xwllm-connect**, so
 - **`DECISIONS.md` entry not written** for the markibx-connect rate-limiting call — a future
   agent reading the ticket will try to reverse it. Held off because another session has
   `DECISIONS.md` modified in the working tree.
+
+## KW PRD piece 1 deployed: parallel host-group sweeps + synthetic ban (mawtarx-connect#5, #8)
+
+Piece 1 of the Kuwait activation PRD (mawtarx-connect#4) is **live on the dev box**. The code
+landed across three repos on 2026-08-05 (`xwsystem bc985658` 0.9.0.81, `xwapi 9c84c996` 0.9.0.14,
+`mawtarx-connect df74e57`); today was the two-step rollout, which is what actually produced the
+numbers below.
+
+**The measured "before" is the whole case for the piece.** Step 1 shipped the gate/pool/ledger
+machinery at `max_workers=1` — behaviourally the old sequential tick — and ran 18h / 158 ticks
+clean. Per-source sweep costs on real traffic:
+
+| source | duration | raw rows |
+|---|---|---|
+| saudisale | 6177s (103 min) | 4846 |
+| sayarat | 5296s (88 min) | 2288 |
+| syarah | 5190s (86 min) | 2392 |
+| hatla2ee.ae | 978s | 463 |
+| opensooq | 118s | 2215 |
+
+Those top three are **three distinct host groups with no reason to wait on each other, costing
+~4h38m strictly serially**. Because the unit is `Type=oneshot` and no second instance can start
+while one runs, a single 103-minute source silences the nominal 5-minute cadence for 103 minutes.
+That is ADR 0002's pathology, quantified on current code rather than inferred.
+
+**Step 2** (`MAX_WORKERS=4`) installed into `/opt/mawtarx-connect-api/.venv` at 13:42; the runner
+has been firing on it since 13:41:40 (`… (max_workers=4)` in the tick summary — a line the old
+code never emitted, which is the only reliable discriminator that new bytes are live).
+
+**Things learned that cost time:**
+
+- **A `oneshot` runner can't be used to verify its own deploy.** Ticks are hours apart and
+  unschedulable. Verification went out-of-band instead: a zero-network harness drives the
+  *installed* runner with scripted adapters and a recording ingest client on the venv Python.
+  It proved host-group keying, per-group serialisation, cross-group overlap, declaration-order
+  identity, ledger terminal rows under concurrency, and the `group_cap` knob — on the deployed
+  bytes, beside a live service, touching nothing.
+- **A src tarball must include `README.md`** or hatchling's metadata step dies outright
+  (`OSError: Readme file does not exist`) — it reads as a pip failure, it isn't.
+- **`ssh … | grep` from this harness can hang long after the remote process exits.** A 120s
+  "timeout" was the local pipe, not the remote work. Redirect to a remote file and `cat` it.
+- **connect-api is on :8253.** :8252 is mawtarx-api's ingest endpoint — probing it for connect-api
+  health returns 404 and looks like a broken deploy.
+- **`xw-backend-ctl` needs the explicit `.service` suffix.** `mawtarx-scraper-runner` is a
+  "Denied unit"; `mawtarx-scraper-runner.service` matches the allowlist regex. Earlier sessions'
+  note that the runner can't be restarted was a missing suffix, not a missing permission.
+- Cleaned up a **stale deploy lock** (`fable-piece1b`, 18h past its 30-min TTL) left by the
+  previous session's crash. Worth checking before assuming the box is busy.
+
+**Left open:**
+
+- **mawtarx-connect#5 stays open for one observational AC** — the 4-worker prod numbers
+  (`host_busy` deferrals, 503-retry count under concurrent ingest, real overlap). Step 1 reported
+  0 for both *by construction*: a bound of 1 cannot exercise either path. Needs a tick with ≥2 due
+  sources in distinct host groups; the daily schedule puts that hours out. Nothing left to build
+  or deploy — only to witness.
+- **mawtarx-connect#1 (SIGTERM drain vs `TimeoutStopSec`) is now sharper than when filed** — four
+  concurrent in-flight sweeps make a forced `SIGKILL` messier than one did.
+- **xwsystem#6 (1.4s cold start from eager pandas/zarr/scipy) is visible in every firing** — the
+  runner burns ~5s wall and 3.6s CPU per tick to do zero work, 288 times a day.
+- `repos/mawtarx-connect/.claude/worktrees/mtc-18` holds another task's uncommitted
+  parse-identity work (#18) — left in place deliberately, not mine to remove.
