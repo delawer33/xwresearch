@@ -207,10 +207,19 @@ not to the federated total the homepage serves.
 
 ## Scraping — a systemd runner, NOT cron (don't read `/etc/cron.d` and conclude "off")
 
-- **`mawtarx-scraper-runner` (systemd *service*) sweeps ~7 Saudi sources.** Live-verified
-  actively sweeping **2026-07-30** (PID last restarted 07-29 05:00 — the box is shared and
-  units get restarted/reverted, so re-verify: `systemctl is-active mawtarx-scraper-runner` +
-  `sudo xw-backend-logs mawtarx-scraper-runner`). Latest full sweeps that day: saudisale ~4.7k,
+- **`mawtarx-scraper-runner` sweeps 14 sources (Saudi + UAE), in parallel since 2026-08-06.**
+  It is `Type=oneshot` — it runs `runner --once` and systemd re-fires it every ~5 min, so
+  **`inactive` is its normal resting state** and `is-active` saying "inactive" is not a fault.
+  Two consequences: no second instance can start while one runs, and `xw-backend-ctl` needs the
+  explicit **`.service` suffix** (`mawtarx-scraper-runner` alone is a "Denied unit"). Since
+  mawtarx-connect#5 the tick sweeps up to `MAX_WORKERS=4` sources concurrently, capped at one
+  in-flight sweep per **host group** (eTLD+1, so `sa.`/`ae.`/`kw.opensooq.com` are one site).
+  Whether new bytes are live is readable from one log line the old code never emitted:
+  `tick done in …s: swept=… deferred=… not_due=… abandoned=… (max_workers=4)`.
+  Measured per-source cost 2026-08-05/06: saudisale 6177s, sayarat 5296s, syarah 5190s,
+  hatla2ee.ae 978s, opensooq 118s, samaco 86s — before the parallel tick those ran strictly
+  one after another, so one 103-minute source silenced the whole cadence for 103 minutes.
+  Earlier live-verification **2026-07-30** (then ~7 Saudi sources, sequential): saudisale ~4.7k,
   syarah ~3.9k, opensooq ~2.7k, sayarat ~2.3k, samaco 64. mawtarx holds **~19k active listings**
   (incl. 5.1k legacy dubizzle NOT in the sweep set). The runner logs `reconcile=True`, but that
   is only the *runner-side request* — the destructive act is server-side gated. As of 2026-08-04
