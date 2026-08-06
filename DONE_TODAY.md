@@ -240,3 +240,119 @@ code never emitted, which is the only reliable discriminator that new bytes are 
   runner burns ~5s wall and 3.6s CPU per tick to do zero work, 288 times a day.
 - `repos/mawtarx-connect/.claude/worktrees/mtc-18` holds another task's uncommitted
   parse-identity work (#18) — left in place deliberately, not mine to remove.
+
+## AqarX market-lifecycle reconciliation — phase 1 built, 4 branches pushed, nothing merged
+
+Branch `feat/market-lifecycle-reconcile` in **aqarx, aqarx-connect, aqarx-api, xwapi** —
+28 commits, all pushed, **deliberately not merged to main** (owner's instruction: branch per repo,
+review before any main merge). aqarx branched off `origin/agent/aqarx-backend-interview-task`, the
+other three off `main`. Worktrees under `worktrees/*-lifecycle` still in place.
+
+Scope shipped: aqarx#3 plan+ADRs, #4 platform trust gate, #5 availability model + durable store
+mutations, #6 connect telemetry/seen-set/profiles, #8 reconcile end to end, #9 API surface,
+#10 benchmark. #7 (sibling-stack review) closed. **All suites green:** xwapi 140, aqarx 197,
+aqarx-connect 50, aqarx-api 36 — the last two repos had **zero tests** before this.
+
+**The design, in one line each** (docs: `aqarx/docs/market-lifecycle-reconciliation-plan.md`,
+ADR 0001 in aqarx, ADR 0001 in xwapi):
+
+- Availability is a **per-advert** axis on `SourceProvenance`, separate from deal type
+  (sale/rent). Property availability is **derived**: active while any advert is active, terminal
+  only when all agree, strongest terminal wins.
+- Absence can never produce a sale. `sold`/`rented` need an explicit provider signal; a trusted
+  full sweep's absence yields `off_market` only.
+- The "may this sweep judge absence?" gate is **domain-free and went to `xwapi.scrapping`**
+  (`sweep_trust.py`), not into the product — 8-reason ordered cascade, every default conservative,
+  `sweep_skip_reason()` with no args returns `profile_not_full`.
+
+**Four things that would have shipped as silent data loss, found by building it:**
+
+1. **Nothing would ever have revived.** Scraped rows arrive `UNKNOWN`, and `UNKNOWN` by design
+   never overwrites a stored value — so a wrongly-expired advert stayed dead forever. The
+   persistence adapter now stamps `ACTIVE`: it is the only code that knows the row came off a live
+   fetch rather than a broker upload.
+2. **That stamp was then too eager.** Portals keep sold listings on the page for weeks, so a bare
+   re-scrape must not clear `sold`. Revive now splits by provenance of the state:
+   `off_market`/`expired`/`withdrawn` (absence-derived) revive; `sold`/`rented` (source-asserted)
+   move only on another explicit signal. ADR 0001 §5 amended.
+3. **`SweepBaselineStore.get()` conflated "first run" with "file corrupt"** — both correctly skip
+   reconcile, but they differ for the *other* decision made from the same answer: whether to seed.
+   Added `read_ok()`. A read fault plus a degraded sweep is exactly the pair that permanently
+   lowers the bar. (This is the sibling stack's live bug, unfiled — see Left open.)
+4. **The arm switch had to be enforced in the route, not the connector.** `Connector._reconcile`
+   consults only the env kill switch, so env-on + service-disarmed would have written. The route
+   degrades the run to a dry run and reports `dry_run` **as applied**, not as requested. Effective
+   enabled = `env AND armed`; the API can only flip one of the two.
+
+**`would_mark` is computed on every run, including skipped and dry ones.** A disarmed run reports
+what it would have marked. That is the direct answer to the sibling stack's blind-arming problem.
+
+### Benchmark: real numbers, and it found a defect in our own code
+
+`aqarx/benchmarks/bench_reconcile.py`, `docs/benchmarks/reconcile-2026-08-06.md`. ext4/NVMe,
+i5-12500H, Py 3.13.7, seed 20260806, 5% absent. Bulk (one write/pass) vs naive (one write/advert):
+
+| store | props | bulk | naive | ratio |
+| --- | --- | --- | --- | --- |
+| json | 10k | 1.0 s | 85 s | 85× |
+| xwstorage | 10k | 1.3 s | 139 s | 108× |
+| json | 50k | 18.9 s | ~2070 s (extrapolated) | 109× |
+| xwstorage | 50k | 29.0 s | ~4188 s (extrapolated) | 144× |
+| memory | 50k | 20.7 s | 17.3 s | **0.83× — slower** |
+
+- **The win is entirely I/O.** On the in-memory store there is none. Stated in the doc, not buried.
+- **Persistence is no longer the bottleneck at 50k — our own scan is.** `store.py:199 _apply_one`
+  walks every property per update, so a bulk pass is O(properties × updates): ~125M property
+  visits to mark 2,500 adverts. 5× data → 40× time. Fix is a one-pass `(source, source_id)` index,
+  ~20 lines. **Do this before aqarx#11** — the guard test currently pins "one write" while the real
+  cost has moved elsewhere.
+- First run measured **tmpfs** (default temp dir on this host). `--workdir` added, re-run on ext4;
+  every ratio above is the conservative one. tmpfs understates a whole-document write by 25–55%.
+- Unmeasured and larger than reconcile: **ingest has no batched counterpart** — a 10k-advert sweep
+  pays ~10k whole-document writes on upsert against 1 on reconcile.
+
+### Sibling-stack review (aqarx#7, closed) — 4 findings filed, 1 duplicate caught
+
+Every claim re-verified against current code with file:line before filing; 6 of 8 candidates
+confirmed, 1 reframed into something worse, 1 refuted as stale.
+
+- **mawtarx-api#7** (reliability) — `/connectors/runs` 500s **permanently** once any ingest sweep
+  exists: response model types `reconcile: bool`, the worker always stores `dict|None`. Worse than
+  first described — the `= False` default never applies because the key is always present, so it is
+  every ingest run, not only reconciling ones.
+- **mawtarx#16** (performance) — reconcile writes the whole collection **per marked listing** and
+  never bumps `store.version`; `bulk_persist`/`mark_persist` exist and CLAUDE.md already mandates
+  them.
+- **mawtarx#17** (correctness) — `delisted_at` never cleared on revival → kara's browse computes
+  the sold window from a stale date.
+- **mawtarx-api#9** (safety) — `?reconcile=true` on both admin pull routes is **unreachable for
+  every source**: no profile is passed, so the gate always answers `window_not_measured`, silently.
+- **Refuted, not filed:** "no write fence on the reconcile path" — stale, the store rides the
+  fenced DB handle (`state.py:219-223`), default on.
+- **Closed as duplicate:** my mawtarx-api#8 (disarmed reconcile records no would-expire stats)
+  duplicated **mawtarx-api#3**, filed 3 days earlier. Process lesson: I verified against code but
+  did not check the tracker for prior art first. Do that before filing.
+
+### Left open / not done
+
+- **Nothing merged to main, nothing deployed** — by instruction, and aqarx is dormant with no VPS
+  service, so there is nothing to deploy. Worktrees deliberately left in place.
+- **aqarx#3–#6, #8–#10 left open** despite being implemented: not on main. Close them at merge.
+- **aqarx#11–#16 not started**: runner, staleness, provider signals, identity registry, identity v2
+  (review-gated), scraper relocation.
+- **aqarx#13 is blocked on an external answer** — which providers publish an explicit sold/rented
+  marker. Until then the provider signal map ships **empty by default**, so no provider can emit
+  `sold`/`rented`. Two more pending decisions carry stated defaults in the plan §10: geometric
+  identity finality, and run-history retention (90 days / 1000 runs per source).
+- **Two verified sibling-stack findings held back, not filed** (want a second read first):
+  an unbounded `_inflight` set in mawtarx-api that silently drops a re-sent batch once its LRU
+  entry ages out; and the **baseline-clobber** on the `no_baseline` seeding path — a failed
+  baseline read lets a degraded sweep overwrite the good count. That second one is the live version
+  of defect 3 above.
+- **aqarx-connect has one pre-existing network-dependent failure**
+  (`test_country_platform_downloads.py`) — fails identically on untouched main, not ours.
+- `_VERSION_FIELDS` gaining availability **changes the content hash**, so the first fetch after this
+  lands opens one new version per identity. Harmless on a dormant store; needs a word before it
+  ever runs against a live one.
+- `require_auth` is aqarx-api's only auth tier and admits anonymous callers while
+  `AQARX_ALLOW_ANON=1` (its dev default). Any deployment that arms reconciliation must set it to 0.
