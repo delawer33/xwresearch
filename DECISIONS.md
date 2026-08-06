@@ -12,6 +12,30 @@ to a few lines — link the deep doc, don't inline it.
 
 ---
 
+## D-022 — LLM rate limiting stays on `xwapi.scrapping`; xwai does not get a limiter
+
+**2026-08-06 · markibx-connect#2** — the ticket's last acceptance criterion asked that
+`llm_depth.py`'s rate limiting be "configured through xwai rather than a local `_rate_limiter`
+helper". **Not done, deliberately.**
+
+**Why:** xwai has no rate limiter to configure. `xwai/config.py:29 enable_rate_limiting: bool =
+True` is a **dead flag** — nothing outside xwai's own tests reads it, and there is nothing
+behind it. And `_rate_limiter` was never local hand-rolling: it returns
+`exonware.xwapi.scrapping.TokenBucketRateLimiter`, which `docs/tool-index.md` already names as
+the rate-limiting home. Following the ticket would have replaced working platform reuse with a
+duplicate or a dead flag — a regression against the reuse-xw*-first rule the ticket was
+otherwise serving.
+
+**Do not reverse by reading the ticket.** markibx-connect#2 is closed with this criterion
+explicitly unticked. If LLM-specific throttling (token-per-minute budgets, per-model quotas)
+is ever needed, that is a *new* capability and the layer question gets asked fresh — it is not
+a reason to move the existing request-rate bucket off xwapi.
+
+**Code:** `repos/markibx-connect/src/exonware/markibx_connect/llm_depth.py:59-61` (reasoning in
+the module docstring) and `:477-485` (`_rate_limiter`).
+
+---
+
 ## D-021 — the store lease is per-process and identified by (role name, pid), not per-writer
 
 **2026-08-06 · xwstorage-db#2 + mawtarx-api#6** — mawtarx-api#6 asked for the lease around the

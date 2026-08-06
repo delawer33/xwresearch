@@ -104,3 +104,77 @@ Process lesson, now written into `.claude/skills/end-session/SKILL.md`: **everyt
 place. When a merge or push is refused, that is a blocker to raise on the spot — not a state to
 document and hand back. I spent the end of the session reorganising the report and trying to
 reopen issues around a block that a single retry cleared.
+
+## Part 1 of the 3-part issue run: the xwai/LLM slice — landed, 2 of 3 closed
+
+Three issues asked to add an Anthropic provider and collapse two hand-rolled callers onto it.
+Two are closed, one is landed-but-open pending a real API key.
+
+**xwai#1 — the premise was wrong, and that mattered.** An Anthropic provider already existed at
+`xwllm_connect/providers/anthropic.py`, and `xwai/providers/__init__.py` is a back-compat shim
+already re-exporting it. It only looked missing because xwai / xwllm / xwllm-connect had never
+been cloned into `repos/`. Cloned all three, installed editable `--no-deps`, doctor 40 ok.
+Hardened the real provider instead of adding a duplicate — and it could not have worked as
+shipped: default model was `claude-3-5-sonnet-latest` (**retired 2025-10-28**), and `stream()`
+used a sync `with` on `messages.stream()`, which the real SDK (0.120.2) exposes only as
+`__aenter__`. Also: sampling params now dropped for the families that 400 on them
+(opus-5/4-8/4-7, sonnet-5, fable-5, mythos-*) and reported in `metadata["dropped_params"]`;
+`max_tokens` defaults raised to 16000/64000 because thinking is on by default on Opus 5 and
+`max_tokens` caps thinking + text together; `AsyncAnthropic`; keys scrubbed from exceptions.
+34 new tests, offline, no key. `xwllm-connect 03f48f6..e203a4f`.
+
+**markibx-connect#2 — closed with one criterion deliberately unmet.** 404 lines of urllib
+Anthropic client deleted; transport is XWAI. But "configure rate limiting through xwai" is
+impossible: xwai's `config.py:29 enable_rate_limiting` is a **dead flag** — nothing outside
+xwai's own tests reads it and there is no limiter behind it. The existing `_rate_limiter`
+already returns `xwapi.scrapping.TokenBucketRateLimiter`, which `docs/tool-index.md` names as
+the rate-limiting home, so doing what the ticket asked would swap working platform reuse for a
+dead flag. Left as-is, reasoning recorded at `llm_depth.py:59-61`.
+`markibx-connect 35a1fab..f11c2df`.
+
+**mawtarx#15 — "correct code, missing dependency" was false.** The ticket said the method was
+correct and only the dependency was absent. `llm_xwai.py` carried three crash bugs, all
+reachable from `store.upsert()` — the exact write path the ticket says it must never raise
+into: a bare `float()` outside the `try`; `except Exception` re-raising anything whose type name
+did not end in `Error`; and `confidence_score: 0` treated as absent because falsy. Also: xwai
+alone is **not** enough — the provider factories live in **xwllm-connect**, so
+`connect("anthropic")` finds no factory without it; the new `llm` extra names both.
+`mawtarx ae82623` (pushed under another session's `2decda9`).
+
+### Facts worth keeping
+
+- **`send_prompt(output_format="json")` does not produce JSON.** Measured: returns the model
+  text verbatim, fenced, typed `ResponseFormat.TEXT`. xwai's facade never converts
+  `output_format` into `response_format` — it only injects it as a system-prompt hint.
+  Provider-agnostic, so every provider on that path behaves the same. Filed xwai#2. Matters
+  because `mawtarx`'s `_call_xwai` uses exactly that call.
+- **The depth engine's evidence model does not hold on its own default model.** N-sample
+  corroboration at a pinned temperature is the ADR 0010 story, but `temperature` is rejected
+  outright by claude-*-5 and is now stripped before the request, so it never reaches the API.
+  The docstring called that guard "the single most load-bearing line here" — false; corrected
+  it and the repo CLAUDE.md.
+- **markibx-connect has 2 pre-existing test failures** — `test_4runner_never_reaches_the_catalog…`
+  and `test_4runner_gains_a_dbpedia_year…`. Proved by baselining a detached worktree at `main`
+  before merging; both fail identically there. Don't re-debug them as a regression.
+- Shared-checkout hazards hit twice: mawtarx `main` had another session's uncommitted
+  `pyproject.toml` edit (stashed by path, merged, popped — both edits coexist), and that session
+  pushed my merge commit along with theirs while I was working.
+
+### Left open
+
+- **mawtarx#15 needs one real API call.** Two criteria unmet: a stored `method=llm_xwai`
+  estimate end-to-end, and measured latency/token cost per listing. No key in this environment.
+  One run produces both. Check the xwai#2 JSON-parsing gap during that run rather than assuming
+  the method's own parsing absorbs it.
+- **Part 2 (MCP) half-built.** xwapi#2 implemented and green (954 passed) on
+  `fix/xwapi-2-mcp-engine` `05ddb3c2` — **unmerged, unpushed, unclosed**. mawtarx-api#5 not
+  started, and it is blocked on a real finding: **xwapi's MCP engine has no authorization seam
+  at all.** `MCPDispatcher.dispatch(msg, session)` never sees request headers, `MCPSession`
+  carries no principal, `_tools_call` invokes the action directly, `tools/list` is unfiltered.
+  mawtarx-api's auth is entirely FastAPI `Depends(...)` injected in `_routers.py`, nothing on
+  the XWAction — so publishing its actions over MCP as-is is a silent, total auth bypass. The
+  seam belongs in xwapi (layer cascade), and must be built before mawtarx-api#5.
+- **Part 3 (xwaction#3, route security / D-019) not started.**
+- **`DECISIONS.md` entry not written** for the markibx-connect rate-limiting call — a future
+  agent reading the ticket will try to reverse it. Held off because another session has
+  `DECISIONS.md` modified in the working tree.
