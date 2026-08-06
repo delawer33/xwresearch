@@ -82,17 +82,37 @@ the loop in `bulk_write()`.
   call site. Opening an existing store read-only is otherwise just:
   `await XWDatabase.open(XWDatabaseConfig(name="probe", root_path=Path(p).resolve()))`
   then `list(db.find("<collection>"))` — handy for measuring against a real store.
-- **The engine write path takes no cross-process lock.** Its only synchronization is a
-  `threading.RLock` inside one engine instance. Two processes opening the same DB root will still
-  silently corrupt each other. **One writer process per database, always** — if a background job
-  must write, run it inside the process that owns the store, not beside it.
-  *Caveat to the old "no locking anywhere" claim:* a cross-process primitive now **exists** but is
-  **not wired in** — `fencing.py`'s `PartitionLease` is an `O_EXCL`-file fencing-token lease
-  (crash-safe as of the 2026-07 orphan-mutex fix) that rejects a stale writer resumed after
-  ownership moved, which a plain `flock` can't. It is unexported and no write path calls it yet;
-  wiring it into `engine.py` is the intended way to close the two-writer hole. `xwsystem.FileLock`
-  (also cross-process, `flock`-based) is the *mutual-exclusion* tool for callers like the scraper;
-  for the DB itself the fencing lease is the stronger fit.
+- **The write path is unprotected across processes until you ask for it.** The engine's only
+  built-in synchronization is a `threading.RLock` inside one instance, so two processes opening the
+  same root silently overwrite each other — and because a write rewrites the whole collection file,
+  the loser's rows vanish without a trace. **Default rule is still one writer process per
+  database.**
+
+  What closes it, when you cannot guarantee that: `options={"fencing": "<service-role>"}` on
+  `XWDatabase.open` (`"fencing_ttl"` in seconds, default 30). Off by default, so no existing store
+  changes. With it on, a second live process is refused at open with `XWStorageDbConcurrencyError`
+  **naming the current holder**, and a writer whose partition is taken while it was paused fails on
+  its next write instead of overwriting newer data. `PartitionLease`, `Lease`, `FencedError` and
+  `XWStorageDbConcurrencyError` are all exported from `exonware.xwstorage.db`. Cost: a flat
+  ~22-27 us/write (4% at 20k rows; see that repo's `docs/REF_54_BENCH.md` §3.4 — read the absolute,
+  not the ratio). Wired end to end by mawtarx-api#6 / xwstorage-db#2, 2026-08-05.
+
+  Three things to know before switching it on:
+  - **It is cooperative.** A root is only as protected as its least careful writer; a process that
+    opens without `fencing` still writes unfenced. Wire every writer of a root, or none.
+  - **Ownership is (owner name, pid).** A stable role name is the right choice — a second *live*
+    process reusing the name is refused, and a restart whose predecessor died reclaims the lease at
+    once (dead-pid reap, same host only) rather than waiting out the TTL.
+  - **A fenced writer must not resume in place.** While someone else held the partition they
+    rewrote the files, and this process still holds the caches it built at open. Recovery is a
+    process restart, not a retry. This holds **even after the other process lets go** — a released
+    root reads as free, so the engine reclaims only on proof the partition never moved (same owner,
+    same pid, same token still on disk) and otherwise raises. Don't "fix" that by calling
+    `acquire()`; it was the bug, not the design.
+
+  `xwsystem.FileLock` (also cross-process, `flock`-based) remains the plain *mutual-exclusion* tool
+  for non-DB callers like the scraper's sweep locks; for the database itself the fencing lease is
+  the stronger fit, because only a token can reject a resumed stale writer.
 - **RAM is the real capacity ceiling, not disk.** At ~7 KB/doc resident, per process, unshared
   across workers: 100k docs ≈ 0.7 GB, 1M ≈ 7 GB. Multiply by worker count. The
   exonware-riyadh-01 box has ~15 GB and is multi-tenant.
@@ -121,8 +141,9 @@ the loop in `bulk_write()`.
 
 ## What does NOT exist here
 
-No cross-process coordination. No index persistence. No partial-collection writes. No
-`update_many`. No connector matrix (that's `xwstorage-connect`, unwired, and its `EncryptionAtRest`
+No index persistence. No partial-collection writes. No `update_many`. No cross-process
+coordination *by default* — there is opt-in single-writer fencing (above), but nothing that lets
+two processes write one root concurrently. No connector matrix (that's `xwstorage-connect`, unwired, and its `EncryptionAtRest`
 is XOR — see `docs/tool-index.md`).
 
 ## Time series — use this, don't grow a field

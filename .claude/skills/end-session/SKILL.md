@@ -15,6 +15,18 @@ work landed and an issue closed is worse than one that ends with an honest "stil
 **The rule that governs all four: land only what you verified.** Closing an issue, deploying, and
 pushing are all statements to other people. Never make one you haven't checked.
 
+**Everything ends on `main`, pushed. Always, unless the owner said otherwise in this session.**
+A branch is a way of working, never a resting place — a session that ends with the work sitting on
+`feat/…` has not finished, however green the tests are. So gate 2 is not optional and not
+something to defer to the owner: merge every branch you created into `main`, push it, and remove
+the worktree. Report the merge as done only after `git log origin/main` actually contains it.
+
+If a merge or push is refused — the command classifier blocks it, a lease is held, a remote is
+403 — that is a **blocker to raise immediately**, not a result to write up. Say what was refused
+and the exact command, and ask; don't reorganise the report around the parts that worked, and
+don't reopen or annotate issues to describe a half-landed state you could simply have asked about.
+Retry once first: the classifier's stage-2 refusals are usually transient.
+
 ## 1. Is it green?
 
 `task doctor` then the suites for what you touched (`task test`, `task test:workspace`, or the
@@ -44,8 +56,14 @@ The checkout is shared with other sessions, so:
 - **Merge worktree branches into main** from the main checkout, and take the merge lease first
   (the hook does it for you; see `AGENTS.md` §"Repo leases"). Then remove the worktree —
   `git worktree remove` — so the next session doesn't inherit a stale one.
+- **Check `main` isn't already carrying a partial merge of your branch.** A concurrent session may
+  have merged an earlier commit of it; `git log origin/main..main` before you push, and re-merge
+  the branch so the tip lands too. Pushing a partial merge ships the version your later commits
+  fixed — worse than not pushing at all.
 - **Push.** `kara-web` and `markibx-web` are **403** — never promise those; hand the diff to
   their owner. Report each push as `<repo> <old>..<new>`.
+- **Re-run the touched suites against merged `main`,** not just against the branch. The merge
+  brought in whatever else landed while you worked.
 
 ## 3. Deploy it, if it isn't already
 
@@ -74,8 +92,13 @@ gh issue close <n> -R <owner>/<repo> --comment "Implemented in <sha>; verified b
 **Do not close:**
 
 - an issue you filed *this session* for future work — a workaround is not a fix
-- anything partially done, or done but unpushed, or pushed but not deployed when it needed to be
+- anything partially done, or done but not on `main`, or on `main` but not deployed when it
+  needed to be
 - an issue whose acceptance criteria you can't check
+
+Note that "not on `main`" is a gate-2 failure, not an issue-state problem. Fix it there — go get
+the merge unblocked — rather than closing the issue early and then trying to annotate your way out
+of it.
 
 Say which ones you left open and why. "Left #6 open — worked around, not fixed" is a good
 session outcome; a wrongly-closed issue costs someone a week of believing it's handled.
@@ -89,6 +112,9 @@ session outcome; a wrongly-closed issue costs someone a week of believing it's h
 - `DECISIONS.md` — one entry per decision a future agent would otherwise reverse.
 - `task claims` — confirm you're holding nothing. Leases release at `SessionEnd`, but a crashed
   earlier run may still hold one; `task claims:reap` clears the dead.
+- `git worktree list` per repo you touched — none of yours should remain.
+- `git log origin/main -1` per repo you touched — your merge should be there. If it isn't, the
+  session is not over.
 
 ## Report
 

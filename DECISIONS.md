@@ -12,6 +12,33 @@ to a few lines — link the deep doc, don't inline it.
 
 ---
 
+## D-021 — the store lease is per-process and identified by (role name, pid), not per-writer
+
+**2026-08-06 · xwstorage-db#2 + mawtarx-api#6** — mawtarx-api#6 asked for the lease around the
+**ingest worker**, on the premise that ingest is the store's single writer. It isn't: the schedule
+runner, the pricing-refresh runner and plain request threads all write through the same singleton
+`XWDatabase`. A lease held by the worker alone would leave three writers unfenced — **false safety,
+worse than none** — so the lease is taken once at `AppState`'s `XWDatabase.open` and covers every
+write in the process (`state.py`; `mawtarx` CLI and mawtarx-connect's scripts do the same at their
+own opens).
+
+Owner is a **service role name** (`mawtarx-api`, `mawtarx-cli`, `mawtarx-collect`), not
+`<host>:<pid>`, so an operator reading a refusal knows *what* holds the store. The pid is recorded
+alongside, which is what makes both halves work: a second *live* process reusing the role name is
+still refused, while a service whose predecessor was killed reclaims its own root **immediately**
+(dead-pid reap, same host only) instead of waiting out the TTL. TTL-only reclaim was the tempting
+simpler design and is a **deploy-breaker** — every hard restart inside the TTL becomes a failed
+boot.
+
+Rejected: renewing the lease on every write (measured 111 µs/write, enough that nobody would turn
+it on). The write path instead does a cheap token `check()` (~15 µs) every write and only renews
+past half the TTL — 0 renewals in 5,000 writes at ttl=30 — which keeps stolen-partition detection
+at the *next* write while costing a flat ~22 µs (4% at 20k rows; `xwstorage-db/docs/REF_54_BENCH.md`
+§3.4). Also rejected: a `--force` on the CLI. Overriding a live writer is precisely what loses rows.
+
+The scheme is **cooperative** — an opener that omits `fencing` still writes unfenced, so a root is
+only as safe as its least careful writer. Wire every writer of a root, or none.
+
 ## D-020 — on xwrouter, sync route handlers block the loop; `asyncio.to_thread` is the standard
 
 **2026-08-04 · karaa-api#3** — `xwrouter/web.py:1576` awaits `route.fn(**kwargs)` **inline**;
