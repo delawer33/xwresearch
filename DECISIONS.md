@@ -12,6 +12,49 @@ to a few lines — link the deep doc, don't inline it.
 
 ---
 
+## D-025 — MCP authorization is the product's callback; xwapi holds no policy and fails closed
+
+**2026-08-09 · xwapi#2, xwapi `50a919f0`** — publishing any product's XWActions over MCP was a
+total auth bypass: product auth is FastAPI `Depends(...)` at the route layer, nothing lives on the
+`XWAction`, and MCP multiplexes every `tools/call` through one POST, so those dependencies never
+run. The seam went into **xwapi, not the products** (layer cascade), and deliberately carries no
+scope/role vocabulary — it forwards `(tool_name, requirements, credentials)` to an
+`IMCPAuthorizer` the product installs and reads only the truthiness of the answer.
+
+Four calls a future agent might reverse, each with a corpse behind it:
+1. **Credentials travel per message, never pinned at `initialize`.** `SessionStore` is an
+   in-memory dict with no expiry; a token captured at handshake would outlive its own revocation
+   for the life of the process.
+2. **An auth refusal is a JSON-RPC error (`-32003`), not an `isError` result.** `isError` means
+   "the tool ran and failed" and invites the model to retry around it; a refused call never ran.
+3. **Fail closed** — a raising or non-truthy authorizer denies. An authorizer fault must never
+   read as "allow".
+4. **`create_app(engine="mcp")` refuses to publish tools** until the product sets
+   `mcp_authorizer` or `mcp_public`. Before this, `engine="mcp"` yielded an EMPTY catalog, and
+   that emptiness was the only thing keeping the bypass unreachable — so fixing registration
+   alone would have converted a broken path into an unauthenticated one.
+
+Residual, deliberate: a caller driving `register_action(app, action)` with no `route_info` still
+gets an unauthenticated catalog with only a warning, so local stdio embedders (xwmemory) are not
+broken. Closing that means deprecating the two-arg form in a later minor.
+
+---
+
+## D-024 — MCP clients present service tokens only; never a user JWT or the admin token
+
+**2026-08-09 · mawtarx-api#5, PR #11** — mawtarx's MCP surface accepts `xw_...` service tokens
+verified through `AppState.service_tokens`, with the same scope-superset rule
+`xwapi.scopes.require_scopes` applies on HTTP. The other two bearer kinds are refused on purpose:
+a user JWT carries `scopes: []` (it expresses a role, not "may read listings"), and
+`MAWTARX_ADMIN_TOKEN` is all-or-nothing **and open by default in dev** — accepting it would turn a
+dev default into an MCP bypass and make one leaked value a key to every tool.
+
+Exclusion is the default state: `_EXPOSED` in `mawtarx_api/mcp.py` is an allowlist, so a route
+added tomorrow is absent from `tools/list` and refused by `tools/call` without anyone
+remembering. Depends on [[D-025]].
+
+---
+
 ## D-023 — fabricate-only connectors self-declare `synthetic=True` and are barred from the sweep table
 
 **2026-08-06 · mawtarx-connect#8** — 14 adapters have no network code at all: their `fetch()`
