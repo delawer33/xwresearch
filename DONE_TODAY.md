@@ -43,3 +43,50 @@
 - `/pull-repos` is user-triggered only everywhere (skill, CLAUDE.md, AGENTS.md, /design, /doc-diet): agents `git fetch` + report behind-counts + ask; session-start hooks considered and dropped in favour of this.
 - The watchdog-agent idea dissolved into upstream fixes: `/deploy-vps` gained the oneshot-runner code-skew trap and §9 store-op post-conditions (re-measure, never trust the op's report); live health endpoints + `task health` filed as mawtarx-connect#20 (extends #4/#9) — no scheduled agent built, deliberately.
 - Push was classifier-blocked for this session; a concurrent session pushed 0fe62f4 to origin. AGENTS.md's comment-lint hunks were kept out of the commit and left uncommitted for their owning session; only the DONE_TODAY/D-026 record commit may still need a push.
+
+## Two measured per-request O(N) fixes landed on main across 3 repos — deploy still blocked
+
+- **mawtarx `main 2e14fff..684b729`**: `VehicleSearchFilter.matches` ran markibx's nameplate
+  vocabulary (`search_norm_keys`) once per listing, so a `make+model` search cost ~3x an
+  unfiltered one — asking a *more* selective question was more expensive. Hoisted onto a
+  `_query_keys` `cached_property`; undoing it measures **+18.84 ms (+746%)** over 2,500 rows. The
+  SQL path always hoisted correctly, so both backends agreed on the answer and disagreed on the
+  cost; the new test pins the **call count**, since an answer-only test passes against the per-row
+  version.
+- **karaa-api `main 597c2fc..453bbb2`** (9 commits): `/search/listings` re-walked the whole
+  inventory twice per request (source allowlist + browse visibility) behind a query-keyed response
+  cache — now one `inventory_cache.browse_snapshot` per data version (+42%/+63%/+83% when undone);
+  uvicorn's per-request access log is off by default (nginx already writes it).
+  `routes/v1/listings.py` was deliberately left alone: aligning its visible set is a behaviour
+  change, not a caching change.
+- **xwbase-media `main 87d61a0..bb769fa`**: kept the thumbnail-allowlist memo but corrected its
+  docstring — the "11% of the card-mapping profile" it cited is a cProfile artifact; wall-clock
+  ablation moved the endpoint by ±0.14 ms, i.e. nothing. Wrong numbers in shared docstrings get
+  re-cited.
+- **Two benchmark traps, now D-027**, both of which invalidated earlier numbers: cProfile inflates
+  these once-per-row frames ~3x, and the in-process pricing-refresh daemon steals the GIL from the
+  request being timed (`/health` 23.80 ms with it up vs **0.32 ms** without). Every harness now
+  sets `KARAA_PRICING_REFRESH=0`.
+- **Seeder fixed, and it found a second O(N²)**: the synthetic seeder wrote via bare `upsert()`,
+  which rewrites the whole collection per row — 500 rows took ~5 min and 15,000 extrapolated past
+  70 hours, which is *why* every benchmark so far ran at 2,500 rows. `bulk_persist()` removes the
+  disk half (600 rows in 25s), but the in-memory `upsert()` is still O(N), so 15k is ~4 h. That
+  superlinearity is karaa-api#5 item 4 and mawtarx#16, neither of which was touched.
+
+## Left open
+
+- **NOT DEPLOYED — blocker.** `xw-deploy-lock acquire` and even a read-only venv import probe over
+  ssh were classifier-refused (a bare `ssh … echo` passes, anything further does not). Both wheels
+  build clean locally, so the deploy is pre-validated and one lock away; deploying without the
+  lock on a box shared by other agent sessions is not an option. Needs a human.
+- **karaa-api#5 stays open** — only decision item **3 of six** shipped and signed off; items 1
+  (fencing), 2 (drain the `ALLOWED` set), 4 (the O(N²) write path) and 6 (shorten the store lock)
+  are untouched. Item **5 (`--workers`) should be closed as rejected**, not done: the 400–500 rps
+  single-worker figure removed its justification.
+- **Benchmarks are still 2,500 synthetic rows in `local`**, not the dev box's ~15k. `hybrid` needs
+  no separate run — `iter_all()` is an in-memory merge behind `full_snapshot`'s per-version cache
+  and neither fix touches it, so N is the only variable. The 15k seed was left running.
+- `xwresearch main` is 1 commit ahead (`cacd698`, D-027) — `git push` classifier-blocked twice.
+- Pre-existing, proved not mine: karaa-api fails 7 of 347 (`test_api` order-sensitivity,
+  `test_home_brand_shortcuts`, 5× `test_trim_catalog`) identically on post-pull main; mawtarx is
+  590/590 green.
