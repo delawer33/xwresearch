@@ -1,5 +1,22 @@
 # Done today — 2026-08-09
 
+## Formal doc system adopted — placement gate now fires at plan time
+
+- Cloned the company's formal doc system (`Exonware/docs`) into `repos/docs` and made it
+  discoverable: two CLAUDE.md trigger rows + a `/pull-repos` entry keep it synced and findable.
+- Wired its 7-question placement/boundary gate into the project-level `/grill-me`,
+  `/grill-with-docs`, and `/design` skills: any new dependency/package/module now gets a
+  Pass/Findings/Block verdict while planning, not at implementation time.
+- GUIDE_16 LLM rules (pin model, schema-validate output, verify before store writes) added as
+  one-line rare-case pointers only, per owner feedback; commented on xwai#2 that schema-validated
+  output is now a formal gate blocking the planned markibx LLM depth engine.
+- Swept all ~50 repos: only `xwdata` fast-forwarded (stock orjson dropped); 6 repos left behind
+  (kara-web 84, xwui 147, xwmemory 8, mawtarx-api 4, xwnode 3, kara-connect 2) because other
+  sessions' uncommitted edits collide — theirs to land. Deliberately NOT adopted: the
+  adopt-persona session ritual, xwmemory MCP wiring (Linux native bundle unproven), and the 5
+  persona-vs-practice conflicts (PR-only, deploys, rm, paths) — owner parked them, current
+  practice stands.
+
 ## Part 2 of the 3-part issue run — MCP, end to end
 
 **xwapi#2 — LANDED and CLOSED.** `main 54b5b56f..50a919f0`. 1735 passed / 23 skipped, verified on

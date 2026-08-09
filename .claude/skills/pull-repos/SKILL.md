@@ -2,13 +2,22 @@
 name: pull-repos
 description: >
   Sync the ecosystem's independent repos under repos/ from their remotes and report exactly
-  what landed. Use whenever the user says "pull", "pull the repos", "pull changes", "pull the
-  latest", "sync the repos", "update the repos", "fetch", or names repos/families to pull
-  (e.g. "pull kara/mawtarx/markibx") — and before ANY analysis of what code does, exists, or
-  is adopted.
+  what landed. USER-TRIGGERED ONLY: use when the user explicitly says "pull", "pull the repos",
+  "pull changes", "pull the latest", "sync the repos", "update the repos", "fetch", or names
+  repos/families to pull (e.g. "pull kara/mawtarx/markibx"). Never invoke it on your own
+  initiative — if you suspect staleness, git fetch (read-only) and ask.
 ---
 
 # Pull repos
+
+## Rule -1 — user-triggered only
+
+**This skill mutates ~40 checkouts shared with other live sessions.** An agent-initiated pull
+can move a repo under another agent mid-edit. So: run it only on an **explicit user request in
+this conversation**. No request → don't pull. If you suspect staleness, do the read-only part
+yourself — `git fetch` + the behind/ahead/dirty table from §2 (fetch only updates
+remote-tracking refs, it can't touch anyone's working tree) — report it, scope your claims
+("in the repos as last synced"), and ask the user whether to pull.
 
 Every subdir of `repos/` is its **own independent git repo** (`repos/` is gitignored by
 xwresearch). There is no single `git pull` for this workspace. Skipping one repo, or reading a
@@ -31,6 +40,7 @@ A named family means **every repo in it**, and the prefixes are inconsistent:
 | `mawtarx` | `mawtarx`, `mawtarx-api`, `mawtarx-connect`, `mawtarx-connect-api`, `mawtarx-web` |
 | `markibx` | `markibx`, `markibx-api`, `markibx-connect`, `markibx-connect-api`, `markibx-web` |
 | "everything" / unscoped | every dir in `repos/` with a `.git` (~40, including `xw*`) |
+| `docs` / "the formal docs" | `repos/docs` — the `Exonware/docs` company doc system (personas, guides, prompts, skills). Docs-only, no code; included in unscoped pulls |
 
 Glob both spellings: `ls -d repos/kara* repos/karaa*`. When unsure whether a repo belongs, include
 it — a needless fetch costs nothing.

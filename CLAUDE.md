@@ -14,6 +14,7 @@ trigger, not a suggestion:
 | Before you…                                                            | Read                                                                   |
 | ---------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | …plan, grill, or design **any feature** (before designing behaviour)   | ask the layer question **xw > product > project** and **record the answer** — does this belong in an `xw*` package first? (cascade: **`AGENTS.md` §2**) |
+| …add a dependency, create/move a package, or add a module (exonware repos) | the 7-question gate: **`repos/docs/prompts/PROMPT_03_ROLE_04_PLACEMENT_BOUNDARY_CHECK.md`** — verdict Pass/Findings/Block *at plan time* (wired into `/grill-me`, `/grill-with-docs`); Block is a good outcome |
 | …reason about what exists, what's live, or what talks to what          | **`ARCHITECTURE.md`**                                                  |
 | …write or change **any** code                                          | **`AGENTS.md`** (the loop + conventions)                               |
 | …write **any** utility, helper, or client                              | **`docs/tool-index.md`** — it probably already exists                  |
@@ -21,6 +22,7 @@ trigger, not a suggestion:
 | …use a term you can't define (`catalog_car_id`, `dedup_key`, `make_norm`) | **`docs/glossary.md`**                                              |
 | …touch a specific repo                                                 | that repo's own **`CLAUDE.md`** — truth for that repo, and its gotchas |
 | …claim code works, or that something is broken                         | run it: **`task doctor`** then **`task test`** (root `Taskfile.yml`)   |
+| …hit a company-standard, role-boundary, or "who owns/decides X" question | **`repos/docs/`** (guides/, personas/, prompts/) — the formal doc system |
 
 ## Verify by running, not by reading
 
@@ -45,8 +47,9 @@ CI helper, read **`docs/tool-index.md`'s "Workspace tooling"** — it also recor
 
 `repos/` holds ~40 **independent git repos**. Two worlds: the **karaa** car product (live, in
 active development) and the **xw\*** platform libraries it's built on. Map: `ARCHITECTURE.md`.
-It's a slice of the company, not all of it — `xwui` licensing, `aqarx`, `opsx`, `maalx` and
-friends are real and live outside this checkout.
+It's a slice of the company, not all of it — `xwui` licensing, `opsx`, `maalx` and friends are
+real and live outside this checkout. A third, dormant world is now in here too: the **aqarx**
+real-estate family (`ARCHITECTURE.md`).
 
 ## Company priority (weigh every task against this)
 
@@ -66,8 +69,9 @@ axes, and it's easy to spend a month entirely in P3 without noticing.
 
 2. **Verify against synced code, not prose.** A doc's claim is a hypothesis until you check.
    Repos go stale, live repos go missing from `repos/`, deleted files linger on disk — each looks
-   exactly like "this doesn't exist." Run **`/pull-repos`** first, and check the running server
-   when that's cheaper than reading.
+   exactly like "this doesn't exist." `/pull-repos` is **user-triggered only** — `git fetch` +
+   behind-counts yourself (read-only, always safe) and ask the user to pull; and check the
+   running server when that's cheaper than reading.
 
 3. **Local ≠ production.** Your data and the server's differ a lot — never reason about prod from
    your local store.
