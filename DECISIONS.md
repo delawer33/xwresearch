@@ -12,6 +12,23 @@ to a few lines — link the deep doc, don't inline it.
 
 ---
 
+## D-026 — `/pull-repos` is user-triggered only; agents fetch and ask, never pull
+
+**2026-08-09** · No agent invokes `/pull-repos` (or any fetch+merge sweep of `repos/*`) on its
+own initiative. Staleness suspicion → `git fetch` + behind/ahead/dirty report (read-only,
+always safe) + ask the user. The full sync is the owner's ritual, typically at day start.
+
+**Why:** the checkouts are shared by several concurrent sessions; an agent-initiated pull moves
+a repo under another agent mid-edit. A session-start auto-sync hook was considered and
+rejected for the same reason. The old rule this supersedes — the skill's own "use before ANY
+analysis" trigger — optimized for fresh claims but priced in zero concurrency.
+
+**Supersedes:** the "before ANY analysis" clause in pull-repos' description (removed).
+**Code/docs:** pull-repos SKILL.md "Rule -1", CLAUDE.md rule 2, AGENTS.md "Sync first",
+/design §3, /doc-diet §4. Do not re-add an auto-sync trigger without revisiting this entry.
+
+---
+
 ## D-025 — MCP authorization is the product's callback; xwapi holds no policy and fails closed
 
 **2026-08-09 · xwapi#2, xwapi `50a919f0`** — publishing any product's XWActions over MCP was a

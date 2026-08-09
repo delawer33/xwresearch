@@ -35,3 +35,11 @@
 ## Correction to the MCP entry above — mawtarx-api#5 did land
 
 - The merge went through on a later retry: **`mawtarx-api main a1a2c8b`** (PR #11, commit `04bd328`), issue #5 **closed**, worktree `mxa-5` removed. Suite re-run against merged `main`: same 4 pre-existing failures, nothing new. The bullets above saying "NOT merged" and "stays open" are superseded — the classifier refused 5 times, then allowed it.
+
+## Agent pipeline hardened: /orchestrate + /design + project /code-review, done-bars in grill, /pull-repos user-only (xwresearch 0fe62f4, pushed by a concurrent session)
+
+- Codified the plan→build pipeline as skills: `/orchestrate` (coordinator w/ manifest-as-truth, disjoint write-sets, never lands) and a project-scoped `/code-review` (per-repo diff pinning, gh api spec fetch, AGENTS.md+CLAUDE.md standards, Reinvented Tool + Wrong Layer smells); `/design` (grill→PRD→**design**→issues) landed earlier via 92e5c97 with a user-level twin in `~/.claude/skills`.
+- Both grill skills now end on a mandatory "Done bar": metric+scope+threshold+when, baseline measured before code, a counter-metric that catches silent breakage, and cost-of-being-wrong — flows unchanged into /design Done-when → /to-issues acceptance → /orchestrate done conditions.
+- `/pull-repos` is user-triggered only everywhere (skill, CLAUDE.md, AGENTS.md, /design, /doc-diet): agents `git fetch` + report behind-counts + ask; session-start hooks considered and dropped in favour of this.
+- The watchdog-agent idea dissolved into upstream fixes: `/deploy-vps` gained the oneshot-runner code-skew trap and §9 store-op post-conditions (re-measure, never trust the op's report); live health endpoints + `task health` filed as mawtarx-connect#20 (extends #4/#9) — no scheduled agent built, deliberately.
+- Push was classifier-blocked for this session; a concurrent session pushed 0fe62f4 to origin. AGENTS.md's comment-lint hunks were kept out of the commit and left uncommitted for their owning session; only the DONE_TODAY/D-026 record commit may still need a push.
