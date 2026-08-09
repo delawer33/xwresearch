@@ -31,3 +31,7 @@
 - **Unfiled xwaction defect**: the native executor never builds declared Pydantic bodies, so `estimate(req: EstimateRequest)` dies — **the live WS-RPC surface has this today**, not just MCP.
 - `XWAPI.create_app(engine="mcp")` can't carry per-tool scopes (facade passes only `{"path","method"}`) — products must use the direct registry path.
 - Part 3 (xwaction#3 — enforce `rate_limit=`/`security=` or fail loudly, D-019) not started.
+
+## Correction to the MCP entry above — mawtarx-api#5 did land
+
+- The merge went through on a later retry: **`mawtarx-api main a1a2c8b`** (PR #11, commit `04bd328`), issue #5 **closed**, worktree `mxa-5` removed. Suite re-run against merged `main`: same 4 pre-existing failures, nothing new. The bullets above saying "NOT merged" and "stays open" are superseded — the classifier refused 5 times, then allowed it.
