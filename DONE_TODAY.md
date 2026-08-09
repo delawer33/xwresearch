@@ -49,14 +49,14 @@
 - **mawtarx `main 2e14fff..684b729`**: `VehicleSearchFilter.matches` ran markibx's nameplate
   vocabulary (`search_norm_keys`) once per listing, so a `make+model` search cost ~3x an
   unfiltered one — asking a *more* selective question was more expensive. Hoisted onto a
-  `_query_keys` `cached_property`; undoing it measures **+18.84 ms (+746%)** over 2,500 rows. The
+  `_query_keys` `cached_property`; undoing it measures **+81.44 ms (+1154%)** over 15,000 rows. The
   SQL path always hoisted correctly, so both backends agreed on the answer and disagreed on the
   cost; the new test pins the **call count**, since an answer-only test passes against the per-row
   version.
 - **karaa-api `main 597c2fc..453bbb2`** (9 commits): `/search/listings` re-walked the whole
   inventory twice per request (source allowlist + browse visibility) behind a query-keyed response
-  cache — now one `inventory_cache.browse_snapshot` per data version (+42%/+63%/+83% when undone);
-  uvicorn's per-request access log is off by default (nginx already writes it).
+  cache — now one `inventory_cache.browse_snapshot` per data version (+5.0–7.5 ms, +34–86%, when
+  undone at 15k); uvicorn's per-request access log is off by default (nginx already writes it).
   `routes/v1/listings.py` was deliberately left alone: aligning its visible set is a behaviour
   change, not a caching change.
 - **xwbase-media `main 87d61a0..bb769fa`**: kept the thumbnail-allowlist memo but corrected its
@@ -67,11 +67,11 @@
   these once-per-row frames ~3x, and the in-process pricing-refresh daemon steals the GIL from the
   request being timed (`/health` 23.80 ms with it up vs **0.32 ms** without). Every harness now
   sets `KARAA_PRICING_REFRESH=0`.
-- **Seeder fixed, and it found a second O(N²)**: the synthetic seeder wrote via bare `upsert()`,
-  which rewrites the whole collection per row — 500 rows took ~5 min and 15,000 extrapolated past
-  70 hours, which is *why* every benchmark so far ran at 2,500 rows. `bulk_persist()` removes the
-  disk half (600 rows in 25s), but the in-memory `upsert()` is still O(N), so 15k is ~4 h. That
-  superlinearity is karaa-api#5 item 4 and mawtarx#16, neither of which was touched.
+- **Seeder fixed** (karaa-api `453bbb2`): it wrote via bare `upsert()`, which persists by rewriting
+  the whole collection per row — 500 rows took ~5 min, which is *why* every benchmark so far ran at
+  2,500 rows. `store.bulk_persist()` already existed for exactly this and mawtarx's own whole-store
+  passes take it; 600 rows now land in 25s and 15,000 in ~20 min, which is what unblocked the run
+  above.
 
 ## Left open
 
@@ -83,9 +83,16 @@
   (fencing), 2 (drain the `ALLOWED` set), 4 (the O(N²) write path) and 6 (shorten the store lock)
   are untouched. Item **5 (`--workers`) should be closed as rejected**, not done: the 400–500 rps
   single-worker figure removed its justification.
-- **Benchmarks are still 2,500 synthetic rows in `local`**, not the dev box's ~15k. `hybrid` needs
-  no separate run — `iter_all()` is an in-memory merge behind `full_snapshot`'s per-version cache
-  and neither fix touches it, so N is the only variable. The 15k seed was left running.
+- ~~Benchmarks are still 2,500 synthetic rows~~ — **done after all**: the 15k seed finished, both
+  fixes re-measured at 15,000 rows (karaa-api `78d1d52`, mawtarx `662ccb9`), #5's row-count
+  criterion met and commented. Query-norm +81.44 ms (+1154%) on `make+model`, snapshot +5.0–7.5 ms;
+  the 2,500-row figures understated both by 3.6–4.3x and should no longer be quoted. `hybrid` needs
+  no separate run for these two — `iter_all()` is an in-memory merge behind `full_snapshot`'s
+  per-version cache and neither fix touches it, so N is the only variable.
+- **A projection I got wrong, recorded so nobody repeats it**: the seeder's first 2,500 rows
+  extrapolated as O(N^2) to "~9.6 h for 15,000" and to the conclusion that #5 item 4 gated the
+  measurement. The full seed took ~20 min — early batches were warm-up, not the quadratic term.
+  Item 4 is still a real write-path cost (mawtarx#16) but does not gate benchmarking.
 - `xwresearch main` is 1 commit ahead (`cacd698`, D-027) — `git push` classifier-blocked twice.
 - Pre-existing, proved not mine: karaa-api fails 7 of 347 (`test_api` order-sensitivity,
   `test_home_brand_shortcuts`, 5× `test_trim_catalog`) identically on post-pull main; mawtarx is
