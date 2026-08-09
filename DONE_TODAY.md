@@ -17,77 +17,17 @@
   persona-vs-practice conflicts (PR-only, deploys, rm, paths) — owner parked them, current
   practice stands.
 
-## Part 2 of the 3-part issue run — MCP, end to end
+## MCP end to end — auth seam landed in xwapi, mawtarx surface built but not merged
 
-**xwapi#2 — LANDED and CLOSED.** `main 54b5b56f..50a919f0`. 1735 passed / 23 skipped, verified on
-the main checkout (the editable-install path products actually import), not just the worktree.
-
-The issue's diagnosis was wrong on every specific: `create_app` does NOT "only branch on fastapi
-and xwrouter" (it dispatches through `api_server_engine_registry.get_engine`), unknown engines
-already raised `ValueError`, and the MCP engine was registered and returned a real surface. The
-actual defect was narrower: `engine="mcp"` returned a working MCP server with an **empty tool
-catalog** — xwaction's action-engine registry has no `"mcp"` entry, so `if action_engine:` was
-falsy and the whole registration block was skipped. Zero tools, no error, nothing above `debug`.
-
-**The thing the issue never mentioned, and the reason it couldn't close alone:** xwapi's MCP
-engine had **no authorization seam at all**. `handle_post` never read `Authorization`,
-`MCPSession` carried no principal, `dispatch` took no credentials, `tools/list` was unfiltered.
-Since every product authorizes at the HTTP route layer (FastAPI `Depends`) and **nothing lives on
-the XWAction**, and MCP multiplexes every `tools/call` through one POST, publishing a product
-catalog over MCP was a total auth bypass. The empty catalog was the ONLY thing keeping it
-unreachable — so fixing registration alone would have turned a broken path into an
-unauthenticated one. Both landed in one merge. See D-025.
-
-**Found by review, not by me:** `register_action`/`generate_schema` ignored their `app` argument
-while the engine is a process-wide singleton. With two apps alive, registering into the protected
-one read the OTHER app's `mcp_public` flag — guard doesn't fire, tools land in the public app's
-catalog — and each `create_app` wiped the previous app's tools. Per-app state now lives in a
-`WeakKeyDictionary` keyed by the app object (`id(app)` rejected: recycled ints in a
-security-relevant lookup). Also removed `self._app`, which was written, never read, and pinned the
-newest app against the weak keying.
-
-**mawtarx-api#5 — committed, NOT landed.** `feat/mxa-5-mcp-readonly` `04bd328`, pushed;
-[PR #11](https://github.com/Exonware/mawtarx-api/pull/11) open. Five read-only tools from the same
-`@XWAction` handlers, no route body copied. 331 tests / 4 failures — the same 4 that fail on
-`origin/main` untouched (`test_homepage`, `test_providers_test_route`, `test_search_filters_batch`,
-`test_vin_report`), **baselined in a clean worktree at `7332c27`, not assumed**. +20 new, green.
-
-Two mechanisms make HTTP handlers run off the HTTP path, worth knowing before anyone tries this
-again in another product:
-- The `state: AppState = Depends(current_state)` default **is** resolved by xwaction's native
-  executor (`engines/base._resolve_injection_params`) — app.py's "the same bodies then run over
-  WS-RPC" comment is true for this half.
-- The ContextVar half is NOT reusable: `_ContextMiddleware` is HTTP-only and WS binds from its
-  `meter` hook. `MCPDispatcher`'s only per-call product callback is the **authorizer**, so it both
-  decides and binds. **Binding cannot move into a wrapper around the handler** — the executor
-  resolves `Depends` BEFORE calling it, so a binder inside is one call too late and every handler
-  silently receives `state=None`, surfacing as `AttributeError` deep in the route.
-
-## Facts verified this session
-
-- **`XWAPI.create_app(engine="mcp")` cannot carry per-tool auth metadata.** The facade's
-  `_register_via_server_engine` passes only `{"path", "method"}` as `route_info`, so per-tool
-  scopes need the direct `api_server_engine_registry` path. That path still supplies a non-`None`
-  `route_info`, so the no-authorizer guard stays armed.
-- **Pre-existing platform gap, NOT MCP-specific:** xwaction's native executor passes a JSON body
-  through as a plain `dict` and never builds the declared Pydantic model, so
-  `estimate(req: EstimateRequest)` dies with `'dict' object has no attribute 'listing_id'`.
-  **The existing WS-RPC surface has the same defect today** — both routers are in
-  `_ws_data_routers`. Worked around locally with a generic coercion; the real fix is an xwaction
-  issue nobody has filed.
-- `xwmemory/server/app.py` is still the only MCP-engine consumer outside xwapi, and it hand-rolls
-  `register_action` — unchanged and still working.
-- mawtarx actions carry `roles == []` and `_security_config == "default"` (a string), not the
-  `roles == ["*"]` default xwaction's base sets. `requirements` is still always a populated dict,
-  but for a different reason than the xwapi docstring implies.
+- **xwapi#2 closed**: `main 54b5b56f..50a919f0` — `engine="mcp"` had returned a working server with an **empty tool catalog** (xwaction's registry has no `"mcp"` entry, so registration was silently skipped); 1735 passed / 23 skipped on the merged main checkout.
+- Shipped the **authorization seam the issue never mentioned**: MCP had none at all, and since product auth is FastAPI `Depends(...)` at the route layer with nothing on the XWAction, publishing any product catalog over MCP was a total auth bypass — the empty catalog was the only thing keeping it unreachable, so fixing registration alone would have opened it (D-025).
+- Review caught a second bypass: `register_action` ignored its `app` argument while the engine is a process-wide singleton, so with two apps alive the guard read the **other** app's `mcp_public` flag and tools landed in the public catalog — now per-app state in a `WeakKeyDictionary`.
+- **mawtarx-api#5 built, green, NOT merged**: `feat/mxa-5-mcp-readonly` `04bd328` pushed, [PR #11](https://github.com/Exonware/mawtarx-api/pull/11) open; 5 read-only tools off the same `@XWAction` handlers, service-token auth only (D-024), off by default.
+- Proved pre-existing so nobody re-debugs them: mawtarx-api's 4 failures of 331 (`test_homepage`, `test_providers_test_route`, `test_search_filters_batch`, `test_vin_report`) fail identically at `7332c27`; deliberately did **not** patch xwaction for the Pydantic-body gap below.
 
 ## Left open
 
-- **mawtarx-api#5 is NOT on `main` and stays OPEN.** PR #11 is ready; the merge is blocked by the
-  command classifier — `git push origin HEAD:main` refused twice, `gh api ... /pulls/11/merge`
-  refused twice. Needs a human click or a Bash permission rule. Do not close #5 until it's merged.
-- Worktree `repos/mawtarx-api/.claude/worktrees/mxa-5` deliberately kept — the branch isn't merged.
-- No deploy: xwapi is a library, and the mawtarx MCP surface is off by default and unmerged.
-- An xwaction issue should be filed for the Pydantic-body gap above; it degrades WS-RPC today, not
-  just MCP.
+- **mawtarx-api#5 stays open** — merge classifier-blocked (5 refusals, 3 command shapes); needs a human click on PR #11. Worktree `mxa-5` kept until then.
+- **Unfiled xwaction defect**: the native executor never builds declared Pydantic bodies, so `estimate(req: EstimateRequest)` dies — **the live WS-RPC surface has this today**, not just MCP.
+- `XWAPI.create_app(engine="mcp")` can't carry per-tool scopes (facade passes only `{"path","method"}`) — products must use the direct registry path.
 - Part 3 (xwaction#3 — enforce `rate_limit=`/`security=` or fail loudly, D-019) not started.
