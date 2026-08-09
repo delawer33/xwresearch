@@ -105,8 +105,9 @@ session outcome; a wrongly-closed issue costs someone a week of believing it's h
 
 ## 5. Leave the record true
 
-- `/done-today` — append this session to `DONE_TODAY.md`, including what deliberately *wasn't*
-  built and any pre-existing breakage you proved, so the next agent doesn't re-debug it.
+- `/done-today` — append this session to `DONE_TODAY.md` in that skill's report format (a `##`
+  headline + 3-5 one-sentence bullets, achievements not narrative), including what deliberately
+  *wasn't* built and any pre-existing breakage you proved, so the next agent doesn't re-debug it.
 - `/sync-ecosystem-docs` — only if a **cross-repo fact** changed (what's live, a dependency, a
   port, a shared convention). Skip it otherwise.
 - `DECISIONS.md` — one entry per decision a future agent would otherwise reverse.
