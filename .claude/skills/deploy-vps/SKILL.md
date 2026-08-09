@@ -91,6 +91,13 @@ sudo call — it's a DNS quirk, not a failure; the command still runs.
   few-hundred local rows for a few seconds post-restart before the ~10k federated
   total appears (see verify step below). `local` = own store only; `mawtarx` =
   pure proxy — prod is neither.
+- **Timer-driven oneshots (e.g. `mawtarx-scraper-runner`) are not in this table and are never
+  "restarted" by a deploy.** A oneshot picks up new code on its next timer fire — but a run
+  already in flight keeps pre-deploy code until it exits, and a long-lived runner process never
+  picks it up at all (2026-07-27 corpse: normalization fix deployed Jul 26, runner process up
+  since Jul 22 kept producing broken rows — the fix was "deployed" and changed nothing). After
+  deploying a lib a runner imports: check for an in-flight run, and verify the **next run's
+  output** actually reflects the change — the deploy succeeding is not the fix being live.
 - **There's an old shared script pair** —
   `markibx-api/scripts/vps-markibx-mawtarx-deploy/{pack-bundle.sh,remote-install.sh}`
   — that bundles and reinstalls all 8 packages (markibx, markibx-connect,
@@ -368,7 +375,21 @@ ls -la /var/lib/<service>/data/... 2>&1   # try without sudo first — ACL often
 
 A file untouched since before you started is not something you broke.
 
-## Standing up a brand-new service (not updating an existing one)
+### 9. Store-mutating data ops: verify the post-condition, not the op's report
+
+An op's own summary — "deleted N", "dry-run reports 0", "relinked M" — is a **claim, not a
+state**. Two corpses: the 2026-07-31 synthetic purge printed success and left 250
+`example.invalid` rows live (re-verified 2026-08-04, still there); the 2026-08-03 relink lost
+~900 links to a watchdog restart mid-op, and only a recount caught it.
+
+So after ANY purge / backfill / relink / reconcile / migration:
+
+- **Re-measure the target number from the store or API in a separate query** — count the rows
+  the op claims are gone, count the links it claims exist — and compare against expected.
+- Report **both** numbers ("op reported 250 deleted; store now holds 0 matching") — never just
+  the op's output.
+- If the op says done and the count disagrees, **the count is the truth** and the op is a bug
+  to file, not a report to forward.
 
 Different flow — `xw-backend-setup` only bootstraps NEW services (unit/user name must start
 `karaa-`/`markibx-`/`mawtarx-`):

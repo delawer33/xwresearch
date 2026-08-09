@@ -89,9 +89,10 @@ Then **verify against code, not prose**:
 - **When a claim is cheap to test against the running system, test it.** One `curl` against the
   VPS beats an hour of reading.
 
-**Sync first — `/pull-repos`.** A stale checkout, an uncloned repo, and a dead file on disk all
-look identical to "this doesn't exist." That skill exists because all three fired at once; its
-"Why this exists" has the full story if you want it.
+**Sync first.** A stale checkout, an uncloned repo, and a dead file on disk all look identical
+to "this doesn't exist." `/pull-repos` is **user-triggered only** (it mutates checkouts shared
+with other live sessions): `git fetch` + behind-counts yourself — that part is read-only and
+always safe — then ask the user to pull. The skill's "Why this exists" has the full story.
 
 **A matching version string is not proof the API matches.** `xw*` repos reuse a version across
 many commits — xwstorage-db sat 19 commits behind at an unchanged `0.0.1.7` while gaining the

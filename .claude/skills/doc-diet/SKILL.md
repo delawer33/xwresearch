@@ -69,7 +69,8 @@ Roughly, in this order — skip anything that isn't true for the repo:
 3. **Delete on sight**: filesystem mirrors, migration maps for finished migrations, install steps
    the README owns, prose restating a code comment (point at `file.py:line` instead).
 4. **Verify before you keep.** A line you can't confirm against current code is a liability —
-   check it or cut it. Sync first (`/pull-repos`); a stale checkout makes you delete real things
+   check it or cut it. Sync first (`/pull-repos` — user-triggered only: `git fetch` + ask if
+   the user hasn't requested a pull); a stale checkout makes you delete real things
    and keep dead ones.
 5. **Re-read the headings when done.** Whole sections go missing in a rewrite — including the
    one that mattered most. (A kara-api security warning vanished between draft and disk and was
