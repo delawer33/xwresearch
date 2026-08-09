@@ -12,6 +12,32 @@ to a few lines — link the deep doc, don't inline it.
 
 ---
 
+## D-027 — size a per-row fix by interleaved wall-clock ablation; cProfile only ranks
+
+**2026-08-09** · No performance claim about these services rests on a profiler. cProfile charges
+per-call bookkeeping to exactly the once-per-row-per-request frames worth optimizing here (2,500
+to 75,000 calls per request), inflating them ~3x on `/search/listings` and mis-ranking every
+candidate against them. Use it to learn *which* functions run and how often; size with N
+interleaved rounds of [baseline, apply, measure, revert] on medians, fresh `offset` per request so
+the response cache never hits, and read ±5% as "no effect measured".
+
+Two corollaries that cost real measurements to learn:
+
+- **Kill the in-process daemon first.** karaa-api's pricing refresh runs markibx normalization in
+  a thread of the *same* process and steals the GIL from the request being timed: `/health` reads
+  23.80 ms with it up and **0.32 ms** with `KARAA_PRICING_REFRESH=0`. Anything that times this
+  service must set it — including a throwaway `python -c`.
+- **A shipped fix can only be measured by undoing it.** `fix_*` = unshipped idea applied, negative
+  delta means it would pay; `unfix_*` = shipped fix reverted, positive delta is what it still
+  saves. Monkeypatching a fix "on" when it is already on measures a no-op, which reads as a
+  successful null result.
+
+Supersedes the profiler-derived figures in kara-api's ADR 0001 and the xwbase-media thumbnail
+memo docstring, both corrected. Harness: `karaa-api/scripts/ablate_fixes.py`; results and the
+cost of learning this: `karaa-api/docs/logs/benchmarks/`.
+
+---
+
 ## D-026 — `/pull-repos` is user-triggered only; agents fetch and ask, never pull
 
 **2026-08-09** · No agent invokes `/pull-repos` (or any fetch+merge sweep of `repos/*`) on its
