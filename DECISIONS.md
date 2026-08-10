@@ -12,6 +12,24 @@ to a few lines — link the deep doc, don't inline it.
 
 ---
 
+## D-028 — markibx core carries its own atomic writer; every other repo uses xwsystem's
+
+**2026-08-10** · `markibx` core declares `dependencies = []` and imports no `exonware.xw*`
+package anywhere — a deliberate zero-dependency property, not an oversight. Making its
+system-of-record writes atomic (issue #36 item 5) therefore could not reach for
+`xwsystem.io.safe_write_text`, the estate's tool for exactly this. It got
+`markibx/src/exonware/markibx/atomic_io.py` instead: the same contract at markibx's
+dependency floor, stdlib only, ~30 lines. The five sibling repos that already depend on
+xwsystem use xwsystem's, and all three forked `_atomic_write` copies were deleted.
+
+Do not "fix" this by adding `exonware-xwsystem` to markibx's dependencies — that trades a
+30-line file for the core's zero-dep property and xwsystem's ~1.4s eager import cost on
+every `markibx` CLI invocation. Two things a future pass may legitimately change: xwsystem's
+writer does **not** fsync before the rename (markibx's does), and `backup=True` is its
+default, so every call site here passes `backup=False`.
+
+---
+
 ## D-027 — size a per-row fix by interleaved wall-clock ablation; cProfile only ranks
 
 **2026-08-09** · No performance claim about these services rests on a profiler. cProfile charges
