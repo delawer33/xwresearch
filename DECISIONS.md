@@ -12,6 +12,53 @@ to a few lines — link the deep doc, don't inline it.
 
 ---
 
+## D-029 — an HTTP-only auth gate must be registered in `deps._HTTP_ONLY_GATES`, or the action is published anonymously
+
+**2026-08-10** · mawtarx-api serves the same `@XWAction` handlers over HTTP, WS-RPC and MCP,
+but a FastAPI `Depends` runs on the HTTP path **only**. So a route-level gate authorizes one
+of three surfaces, and the other two must *exclude* the action instead of re-checking it. The
+WS/MCP filter previously looked for `require_admin` alone, which meant adding
+`require_listings_write` to `/listings` (issue #36 point 3) would have closed HTTP while
+leaving create/update/delete callable by an anonymous WS connection — a fix that looks
+complete and is not.
+
+Every authorization that exists only as a `Depends` therefore has two halves: the
+`dependencies=[...]` on the route, and an entry in `deps._HTTP_ONLY_GATES`. A gate registered
+in one and not the other is a hole. Because that set alone is a denylist that silently re-arms
+this exact bug, `deps.assert_every_dependency_classified` runs at `create_app` and refuses to
+build the WS surface when a router carries a dependency listed in neither `_HTTP_ONLY_GATES`
+nor `_SAFE_OFF_HTTP` — the omission stops startup rather than opening the surface.
+
+Code: `mawtarx-api/src/exonware/mawtarx_api/deps.py` (`http_only_gate`,
+`assert_every_dependency_classified`), consumed by `app.py`'s WS registration and `mcp.py`'s
+build-time tool gate.
+
+---
+
+## D-030 — an unset credential is a refusal, not consent; dev opens the gate with a named flag
+
+**2026-08-10** · Three mawtarx/markibx gates treated missing configuration as permission:
+`require_admin` returned early when `MAWTARX_ADMIN_TOKEN` was unset, and both APIs signed
+sessions with a placeholder secret committed in `settings.py` when `*_JWT_SECRET` was unset.
+An unset variable is the *normal state of a fresh deploy*, so "unset means open" hands the
+admin plane and a forgeable `role: "admin"` claim to whoever asks first.
+
+All three now refuse, and dev reopens them with an explicit, named flag
+(`MAWTARX_ALLOW_OPEN_ADMIN`, `*_ALLOW_INSECURE_JWT`) read through the polarity seam whose
+unrecognised answer is OFF — a typo must never be the thing that opens a control plane. This
+follows the precedent markibx-connect-api's `auth.py` already set, rather than inventing a
+second convention.
+
+Two consequences that are deliberate, not bugs to route around: **the services will not boot
+until real secrets exist in the root-owned `/etc/*.env`** (staged in `ROOT_ASKS.md`; karaa's
+deploy already generates one, these two never did), and the boot guard also rejects any key
+under 32 bytes — an empty value is not equal to the placeholder, so an equality-only check
+passed it while making every login fail at runtime instead of at boot.
+
+Code: `{mawtarx,markibx}-api/src/exonware/{mawtarx,markibx}_api/settings.py`
+(`verify_secrets`, called from both `load_settings` and `create_app`),
+`mawtarx-api/.../deps.py` (`require_admin`).
+
 ## D-028 — markibx core carries its own atomic writer; every other repo uses xwsystem's
 
 **2026-08-10** · `markibx` core declares `dependencies = []` and imports no `exonware.xw*`
